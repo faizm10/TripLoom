@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-python-dateutil
-pandas
-numpy
-matplotlib
-seaborn

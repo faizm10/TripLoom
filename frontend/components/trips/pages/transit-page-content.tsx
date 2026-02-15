@@ -3,9 +3,11 @@
 import * as React from "react"
 import {
   CircleAlertIcon,
+  LinkIcon,
   EyeIcon,
   PencilIcon,
   RouteIcon,
+  SearchIcon,
   Trash2Icon,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -34,7 +36,12 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
-import { getTripTransitRoutes, type TransitMode, type TransitRoute, type Trip } from "@/lib/trips"
+import {
+  getTripTransitRoutes,
+  type TransitMode,
+  type TransitRoute,
+  type Trip,
+} from "@/lib/trips"
 
 type TransitSuggestion = {
   summaryLabel: string
@@ -68,6 +75,7 @@ type ManualDraft = {
   transfers: string
   walkingMinutes: string
   notes: string
+  referenceUrl: string
   provider: "google_maps" | "manual"
   providerRouteRef: string
 }
@@ -77,6 +85,7 @@ type MapPreview = {
   toLabel: string
   mode: TransitMode
   label: string
+  providerRouteRef?: string
 }
 
 const modeOptions: TransitMode[] = [
@@ -132,6 +141,7 @@ function buildEmptyDraft(): ManualDraft {
     transfers: "",
     walkingMinutes: "",
     notes: "",
+    referenceUrl: "",
     provider: "manual",
     providerRouteRef: "",
   }
@@ -157,18 +167,49 @@ function buildDraftFromSuggestion(
     transfers: String(suggestion.transfers ?? 0),
     walkingMinutes: String(suggestion.walkingMinutes ?? 0),
     notes: suggestion.summaryLabel,
+    referenceUrl: "",
     provider: "google_maps",
     providerRouteRef: suggestion.providerRouteRef ?? "",
   }
+}
+
+function parseRoutePairsFromText(text: string): Array<{ fromLabel: string; toLabel: string; referenceUrl?: string }> {
+  const pairs: Array<{ fromLabel: string; toLabel: string; referenceUrl?: string }> = []
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  let pendingLink: string | undefined
+
+  for (const line of lines) {
+    const maybeUrl = line.match(/https?:\/\/\S+/i)?.[0]
+    if (maybeUrl) {
+      pendingLink = maybeUrl
+    }
+
+    const routeMatch =
+      line.match(/^([A-Za-z][A-Za-z0-9 .()'&/-]+?)\s*(?:-|–|—|→)\s*([A-Za-z][A-Za-z0-9 .()'&/-]+)$/) ||
+      line.match(/^([A-Za-z][A-Za-z0-9 .()'&/-]+?)\s*(?:-|–|—|→)\s*([A-Za-z][A-Za-z0-9 .()'&/-]+)\s*:/)
+
+    if (routeMatch) {
+      const fromLabel = routeMatch[1].trim()
+      const toLabel = routeMatch[2].trim()
+      if (fromLabel && toLabel && fromLabel.toLowerCase() !== toLabel.toLowerCase()) {
+        pairs.push({ fromLabel, toLabel, referenceUrl: pendingLink })
+        pendingLink = undefined
+      }
+    }
+  }
+
+  return pairs
 }
 
 function buildDirectionsUrl(fromLabel: string, toLabel: string): string {
   return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(fromLabel)}&destination=${encodeURIComponent(toLabel)}&travelmode=transit`
 }
 
-function buildEmbedMapUrl(
-  preview: MapPreview | null
-): string | null {
+function buildEmbedMapUrl(preview: MapPreview | null): string | null {
   if (!preview?.fromLabel || !preview?.toLabel) return null
   const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY
   if (!key) return null
@@ -183,15 +224,28 @@ function buildEmbedMapUrl(
   return `https://www.google.com/maps/embed/v1/directions?${params.toString()}`
 }
 
+function buildStaticMapUrl(preview: MapPreview | null): string | null {
+  if (!preview?.providerRouteRef) return null
+  const key =
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY ||
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+  if (!key) return null
+
+  const params = new URLSearchParams({
+    size: "900x520",
+    key,
+    path: `weight:5|color:0x1e88e5|enc:${preview.providerRouteRef}`,
+  })
+
+  return `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`
+}
+
 export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
   const fromContext = useTripPage()
   const trip = fromContext ?? tripProp
   const updateTrip = useUpdateTrip()
 
-  const routes = React.useMemo(
-    () => sortRoutes(getTripTransitRoutes(trip)),
-    [trip]
-  )
+  const routes = React.useMemo(() => sortRoutes(getTripTransitRoutes(trip)), [trip])
 
   const [dayIndex, setDayIndex] = React.useState<number>(1)
   const [fromLabel, setFromLabel] = React.useState("")
@@ -209,6 +263,10 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
   const [editingRouteId, setEditingRouteId] = React.useState<string | null>(null)
 
   const [mapPreview, setMapPreview] = React.useState<MapPreview | null>(null)
+  const [routeSearch, setRouteSearch] = React.useState("")
+  const [routeProviderFilter, setRouteProviderFilter] = React.useState<"all" | "google_maps" | "manual">("all")
+  const [routeDayFilter, setRouteDayFilter] = React.useState<"all" | number>("all")
+  const [bulkText, setBulkText] = React.useState("")
 
   const dayOptions = React.useMemo(
     () => Array.from({ length: trip.totalDays }, (_, idx) => idx + 1),
@@ -216,6 +274,10 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
   )
 
   const mapEmbedUrl = React.useMemo(() => buildEmbedMapUrl(mapPreview), [mapPreview])
+  const mapStaticUrl = React.useMemo(
+    () => buildStaticMapUrl(mapPreview),
+    [mapPreview]
+  )
 
   function syncManualFromLookup() {
     setManualDraft((prev) => ({
@@ -233,6 +295,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
       toLabel,
       mode: "walk_mix",
       label: `${fromLabel} → ${toLabel}`,
+      providerRouteRef: "",
     })
   }
 
@@ -299,13 +362,14 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
       if (nextOptions.length === 0) {
         setProviderError("No alternatives found. You can still save this leg manually.")
       } else {
-        setProviderError(null)
         const first = nextOptions[0]
+        setProviderError(null)
         setMapPreview({
           fromLabel: origin,
           toLabel: destination,
           mode: first.mode,
           label: first.summaryLabel,
+          providerRouteRef: first.providerRouteRef,
         })
       }
     } catch {
@@ -328,6 +392,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
       toLabel,
       mode: option.mode,
       label: option.summaryLabel,
+      providerRouteRef: option.providerRouteRef,
     })
   }
 
@@ -390,6 +455,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
       currency: manualDraft.currency.trim() || "USD",
       provider: manualDraft.provider,
       providerRouteRef: manualDraft.providerRouteRef || undefined,
+      referenceUrl: manualDraft.referenceUrl.trim() || undefined,
       transfers: manualDraft.transfers ? Number(manualDraft.transfers) : undefined,
       walkingMinutes: manualDraft.walkingMinutes
         ? Number(manualDraft.walkingMinutes)
@@ -405,13 +471,17 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
         )
       : [...routes, normalizedRoute]
 
-    upsertRoutes(nextRoutes, editingRouteId ? "Transit route updated" : "Transit route saved")
+    upsertRoutes(
+      nextRoutes,
+      editingRouteId ? "Transit route updated" : "Transit route saved"
+    )
 
     setMapPreview({
       fromLabel: normalizedRoute.fromLabel,
       toLabel: normalizedRoute.toLabel,
       mode: normalizedRoute.mode,
       label: `${normalizedRoute.fromLabel} → ${normalizedRoute.toLabel}`,
+      providerRouteRef: normalizedRoute.providerRouteRef,
     })
 
     setEditingRouteId(null)
@@ -429,11 +499,6 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
     if (!selected) return
 
     const draft = buildDraftFromSuggestion(selected, dayIndex, fromLabel, toLabel)
-    if (draft.estimatedCost === "") {
-      setManualDraft(draft)
-      setManualError("Fare is missing from provider results. Enter a cost, then save.")
-      return
-    }
 
     const immediateRoute: TransitRoute = {
       id: crypto.randomUUID(),
@@ -445,10 +510,11 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
       durationMinutes: Number(draft.durationMinutes),
       departureTimeLocal: draft.departureTimeLocal || undefined,
       arrivalTimeLocal: draft.arrivalTimeLocal || undefined,
-      estimatedCost: Number(draft.estimatedCost),
+      estimatedCost: draft.estimatedCost === "" ? 0 : Number(draft.estimatedCost),
       currency: draft.currency,
       provider: "google_maps",
       providerRouteRef: draft.providerRouteRef || undefined,
+      referenceUrl: draft.referenceUrl.trim() || undefined,
       transfers: draft.transfers ? Number(draft.transfers) : undefined,
       walkingMinutes: draft.walkingMinutes ? Number(draft.walkingMinutes) : undefined,
       notes: draft.notes || undefined,
@@ -462,6 +528,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
       toLabel: immediateRoute.toLabel,
       mode: immediateRoute.mode,
       label: selected.summaryLabel,
+      providerRouteRef: immediateRoute.providerRouteRef,
     })
   }
 
@@ -485,6 +552,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
           ? String(route.walkingMinutes)
           : "",
       notes: route.notes ?? "",
+      referenceUrl: route.referenceUrl ?? "",
       provider: route.provider,
       providerRouteRef: route.providerRouteRef ?? "",
     })
@@ -493,6 +561,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
       toLabel: route.toLabel,
       mode: route.mode,
       label: `${route.fromLabel} → ${route.toLabel}`,
+      providerRouteRef: route.providerRouteRef,
     })
   }
 
@@ -503,25 +572,77 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
       if (!prev) return prev
       const deleted = routes.find((route) => route.id === routeId)
       if (!deleted) return prev
-      if (
-        prev.fromLabel === deleted.fromLabel &&
-        prev.toLabel === deleted.toLabel
-      ) {
+      if (prev.fromLabel === deleted.fromLabel && prev.toLabel === deleted.toLabel) {
         return null
       }
       return prev
     })
   }
 
+  function handleImportFromText() {
+    const parsed = parseRoutePairsFromText(bulkText)
+    if (parsed.length === 0) {
+      toast.error("No route pairs found. Use lines like Berlin - Dresden.")
+      return
+    }
+
+    const now = new Date().toISOString()
+    const importedRoutes: TransitRoute[] = parsed.map((entry, idx) => ({
+      id: crypto.randomUUID(),
+      tripId: trip.id,
+      dayIndex,
+      fromLabel: entry.fromLabel,
+      toLabel: entry.toLabel,
+      mode: "other",
+      durationMinutes: 60,
+      departureTimeLocal: undefined,
+      arrivalTimeLocal: undefined,
+      estimatedCost: 0,
+      currency: "USD",
+      provider: "manual",
+      providerRouteRef: undefined,
+      referenceUrl: entry.referenceUrl,
+      transfers: undefined,
+      walkingMinutes: undefined,
+      notes: `Imported from notes (${idx + 1})`,
+      createdAt: now,
+      updatedAt: now,
+    }))
+
+    upsertRoutes([...routes, ...importedRoutes], `Imported ${importedRoutes.length} transit route(s)`)
+    setBulkText("")
+  }
+
+  const filteredRoutes = React.useMemo(() => {
+    const q = routeSearch.trim().toLowerCase()
+    return routes.filter((route) => {
+      if (routeProviderFilter !== "all" && route.provider !== routeProviderFilter) return false
+      if (routeDayFilter !== "all" && route.dayIndex !== routeDayFilter) return false
+      if (!q) return true
+      const blob = [
+        route.fromLabel,
+        route.toLabel,
+        route.notes ?? "",
+        route.mode,
+        route.provider,
+        route.currency,
+        route.referenceUrl ?? "",
+      ]
+        .join(" ")
+        .toLowerCase()
+      return blob.includes(q)
+    })
+  }, [routeDayFilter, routeProviderFilter, routeSearch, routes])
+
   const groupedRoutes = React.useMemo(() => {
     const grouped = new Map<number, TransitRoute[]>()
-    for (const route of routes) {
+    for (const route of filteredRoutes) {
       const existing = grouped.get(route.dayIndex) ?? []
       existing.push(route)
       grouped.set(route.dayIndex, existing)
     }
     return grouped
-  }, [routes])
+  }, [filteredRoutes])
 
   const externalMapUrl = mapPreview
     ? buildDirectionsUrl(mapPreview.fromLabel, mapPreview.toLabel)
@@ -548,10 +669,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
               <div className="grid gap-3 lg:grid-cols-4">
                 <div className="space-y-1.5">
                   <Label>Day</Label>
-                  <Select
-                    value={String(dayIndex)}
-                    onValueChange={(value) => setDayIndex(Number(value))}
-                  >
+                  <Select value={String(dayIndex)} onValueChange={(value) => setDayIndex(Number(value))}>
                     <SelectTrigger className="w-full">
                       <SelectValue placeholder="Select day" />
                     </SelectTrigger>
@@ -566,19 +684,11 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                 </div>
                 <div className="space-y-1.5 lg:col-span-2">
                   <Label>From</Label>
-                  <Input
-                    value={fromLabel}
-                    onChange={(event) => setFromLabel(event.target.value)}
-                    placeholder="Point A"
-                  />
+                  <Input value={fromLabel} onChange={(event) => setFromLabel(event.target.value)} placeholder="Point A" />
                 </div>
                 <div className="space-y-1.5 lg:col-span-1">
                   <Label>To</Label>
-                  <Input
-                    value={toLabel}
-                    onChange={(event) => setToLabel(event.target.value)}
-                    placeholder="Point B"
-                  />
+                  <Input value={toLabel} onChange={(event) => setToLabel(event.target.value)} placeholder="Point B" />
                 </div>
               </div>
 
@@ -634,9 +744,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                     <button
                       type="button"
                       key={`${option.summaryLabel}-${idx}`}
-                      className={`w-full border px-3 py-2 text-left text-xs ${
-                        selectedSuggestion === idx ? "border-primary" : "border-border"
-                      }`}
+                      className={`w-full border px-3 py-2 text-left text-xs ${selectedSuggestion === idx ? "border-primary" : "border-border"}`}
                       onClick={() => handleUseSuggestionForManual(idx)}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -647,9 +755,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                         {option.durationMinutes} min • {option.transfers} transfer(s) • {option.walkingMinutes} min walk
                       </p>
                       <p className="text-muted-foreground">
-                        {option.estimatedCost === null
-                          ? "Fare unavailable"
-                          : formatMoney(option.estimatedCost, option.currency)}
+                        {option.estimatedCost === null ? "Fare unavailable" : formatMoney(option.estimatedCost, option.currency)}
                         {" • "}
                         {formatTime(option.departureTimeLocal)} → {formatTime(option.arrivalTimeLocal)}
                       </p>
@@ -658,13 +764,10 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
 
                   <div className="flex flex-wrap gap-2 pt-1">
                     <Button onClick={handleSaveSelectedSuggestion}>Save selected route</Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        syncManualFromLookup()
-                        setManualError(null)
-                      }}
-                    >
+                    <Button variant="outline" onClick={() => {
+                      syncManualFromLookup()
+                      setManualError(null)
+                    }}>
                       Use manual entry instead
                     </Button>
                   </div>
@@ -754,105 +857,63 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
               <div className="grid gap-3 lg:grid-cols-3">
                 <div className="space-y-1.5">
                   <Label>Duration (minutes)</Label>
-                  <Input
-                    type="number"
-                    min="1"
-                    value={manualDraft.durationMinutes}
-                    onChange={(event) =>
-                      setManualDraft((prev) => ({
-                        ...prev,
-                        durationMinutes: event.target.value,
-                      }))
-                    }
-                  />
+                  <Input type="number" min="1" value={manualDraft.durationMinutes} onChange={(event) =>
+                    setManualDraft((prev) => ({ ...prev, durationMinutes: event.target.value }))
+                  } />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Estimated cost</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={manualDraft.estimatedCost}
-                    onChange={(event) =>
-                      setManualDraft((prev) => ({
-                        ...prev,
-                        estimatedCost: event.target.value,
-                      }))
-                    }
-                  />
+                  <Input type="number" min="0" step="0.01" value={manualDraft.estimatedCost} onChange={(event) =>
+                    setManualDraft((prev) => ({ ...prev, estimatedCost: event.target.value }))
+                  } />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Currency</Label>
-                  <Input
-                    value={manualDraft.currency}
-                    onChange={(event) =>
-                      setManualDraft((prev) => ({
-                        ...prev,
-                        currency: event.target.value.toUpperCase(),
-                      }))
-                    }
-                  />
+                  <Input value={manualDraft.currency} onChange={(event) =>
+                    setManualDraft((prev) => ({ ...prev, currency: event.target.value.toUpperCase() }))
+                  } />
                 </div>
               </div>
 
               <div className="grid gap-3 lg:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label>Departure time</Label>
-                  <Input
-                    type="datetime-local"
-                    value={manualDraft.departureTimeLocal}
-                    onChange={(event) =>
-                      setManualDraft((prev) => ({
-                        ...prev,
-                        departureTimeLocal: event.target.value,
-                      }))
-                    }
-                  />
+                  <Input type="datetime-local" value={manualDraft.departureTimeLocal} onChange={(event) =>
+                    setManualDraft((prev) => ({ ...prev, departureTimeLocal: event.target.value }))
+                  } />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Arrival time</Label>
-                  <Input
-                    type="datetime-local"
-                    value={manualDraft.arrivalTimeLocal}
-                    onChange={(event) =>
-                      setManualDraft((prev) => ({
-                        ...prev,
-                        arrivalTimeLocal: event.target.value,
-                      }))
-                    }
-                  />
+                  <Input type="datetime-local" value={manualDraft.arrivalTimeLocal} onChange={(event) =>
+                    setManualDraft((prev) => ({ ...prev, arrivalTimeLocal: event.target.value }))
+                  } />
                 </div>
               </div>
 
               <div className="grid gap-3 lg:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label>Transfers (optional)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    value={manualDraft.transfers}
-                    onChange={(event) =>
-                      setManualDraft((prev) => ({
-                        ...prev,
-                        transfers: event.target.value,
-                      }))
-                    }
-                  />
+                  <Input type="number" min="0" value={manualDraft.transfers} onChange={(event) =>
+                    setManualDraft((prev) => ({ ...prev, transfers: event.target.value }))
+                  } />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Walking minutes (optional)</Label>
-                  <Input
-                    type="number"
-                    min="0"
-                    value={manualDraft.walkingMinutes}
-                    onChange={(event) =>
-                      setManualDraft((prev) => ({
-                        ...prev,
-                        walkingMinutes: event.target.value,
-                      }))
-                    }
-                  />
+                  <Input type="number" min="0" value={manualDraft.walkingMinutes} onChange={(event) =>
+                    setManualDraft((prev) => ({ ...prev, walkingMinutes: event.target.value }))
+                  } />
                 </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Reference link (optional)</Label>
+                <Input
+                  value={manualDraft.referenceUrl}
+                  onChange={(event) =>
+                    setManualDraft((prev) => ({ ...prev, referenceUrl: event.target.value }))
+                  }
+                  placeholder="https://..."
+                />
               </div>
 
               <div className="space-y-1.5">
@@ -890,9 +951,72 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
             <CardHeader>
               <CardTitle>Saved Routes</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-3">
+              <div className="grid gap-2 lg:grid-cols-4">
+                <div className="relative lg:col-span-2">
+                  <SearchIcon className="pointer-events-none absolute top-2.5 left-2 size-3.5 text-muted-foreground" />
+                  <Input
+                    className="pl-7"
+                    value={routeSearch}
+                    onChange={(event) => setRouteSearch(event.target.value)}
+                    placeholder="Search route, city, notes, mode, link..."
+                  />
+                </div>
+                <Select
+                  value={routeProviderFilter}
+                  onValueChange={(value) =>
+                    setRouteProviderFilter(value as "all" | "google_maps" | "manual")
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All providers</SelectItem>
+                    <SelectItem value="google_maps">Google Maps</SelectItem>
+                    <SelectItem value="manual">Manual</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={routeDayFilter === "all" ? "all" : String(routeDayFilter)}
+                  onValueChange={(value) =>
+                    setRouteDayFilter(value === "all" ? "all" : Number(value))
+                  }
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Day" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All days</SelectItem>
+                    {dayOptions.map((day) => (
+                      <SelectItem key={day} value={String(day)}>
+                        Day {day}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5 border p-3">
+                <Label>Import route options from notes (optional)</Label>
+                <Textarea
+                  value={bulkText}
+                  onChange={(event) => setBulkText(event.target.value)}
+                  placeholder="Paste text like: BERLIN - DRESDEN"
+                />
+                <div className="flex justify-end">
+                  <Button variant="outline" onClick={handleImportFromText}>
+                    Import from pasted text
+                  </Button>
+                </div>
+              </div>
+
               {routes.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No saved transit routes yet.</p>
+              ) : filteredRoutes.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No routes match the current search/filter.
+                </p>
               ) : (
                 <div className="space-y-4">
                   {Array.from(groupedRoutes.entries())
@@ -920,6 +1044,16 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                                   <p className="text-muted-foreground">
                                     Transfers: {route.transfers ?? 0} • Walk: {route.walkingMinutes ?? 0} min
                                   </p>
+                                  {route.referenceUrl ? (
+                                    <a
+                                      href={route.referenceUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="mt-1 inline-flex items-center gap-1 text-muted-foreground underline"
+                                    >
+                                      <LinkIcon className="size-3" /> Source
+                                    </a>
+                                  ) : null}
                                 </TableCell>
                                 <TableCell>{modeLabels[route.mode]}</TableCell>
                                 <TableCell>{route.durationMinutes} min</TableCell>
@@ -945,6 +1079,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                                           toLabel: route.toLabel,
                                           mode: route.mode,
                                           label: `${route.fromLabel} → ${route.toLabel}`,
+                                          providerRouteRef: route.providerRouteRef,
                                         })
                                       }
                                     >
@@ -994,7 +1129,13 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                   <p className="text-xs text-muted-foreground">
                     {mapPreview.label} • {modeLabels[mapPreview.mode]}
                   </p>
-                  {mapEmbedUrl ? (
+                  {mapStaticUrl ? (
+                    <img
+                      src={mapStaticUrl}
+                      alt="Transit route preview"
+                      className="h-[320px] w-full border object-cover"
+                    />
+                  ) : mapEmbedUrl ? (
                     <iframe
                       title="Transit route map"
                       src={mapEmbedUrl}
@@ -1005,9 +1146,9 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                   ) : (
                     <Alert>
                       <CircleAlertIcon className="size-4" />
-                      <AlertTitle>Map embed key missing</AlertTitle>
+                      <AlertTitle>Map key missing</AlertTitle>
                       <AlertDescription>
-                        Set <code>NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY</code> to render the map directly in this panel.
+                        Set <code>NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY</code> for embed or static map preview.
                       </AlertDescription>
                     </Alert>
                   )}

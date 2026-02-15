@@ -25,6 +25,7 @@ export type TransitRoute = {
   currency: string
   provider: "google_maps" | "manual"
   providerRouteRef?: string
+  referenceUrl?: string
   transfers?: number
   walkingMinutes?: number
   notes?: string

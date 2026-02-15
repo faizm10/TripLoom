@@ -8,10 +8,17 @@ import { getDateRangeLabel, getTripStatusLabel } from "@/lib/trips"
 export function TripListSection({ trips }: { trips: Trip[] }) {
   return (
     <section className="rounded-sm border bg-card p-5 sm:p-6">
-      <p className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
-        All Trips
-      </p>
-      <h2 className="mt-2 text-xl font-semibold">Trip list</h2>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
+            All Trips
+          </p>
+          <h2 className="mt-2 text-xl font-semibold">Trip list</h2>
+        </div>
+        <Button asChild variant="outline" size="sm">
+          <Link href="/trips">View all trips</Link>
+        </Button>
+      </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         {trips.map((trip) => (

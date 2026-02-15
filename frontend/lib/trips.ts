@@ -25,6 +25,12 @@ export type Trip = {
   activities: string[]
 }
 
+export type TripBuckets = {
+  future: Trip[]
+  current: Trip[]
+  past: Trip[]
+}
+
 const trips: Trip[] = [
   {
     id: "toronto-spring",
@@ -235,4 +241,39 @@ export function getMissingChecklist(trip: Trip): string[] {
 
 export function getDateRangeLabel(trip: Trip): string {
   return `${trip.startDate} to ${trip.endDate}`
+}
+
+function parseDateUtc(date: string): Date {
+  return new Date(`${date}T00:00:00.000Z`)
+}
+
+function startOfUtcDay(date: Date): Date {
+  return new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate())
+  )
+}
+
+export function getTripsByTimeline(
+  allTrips: Trip[],
+  referenceDate = new Date()
+): TripBuckets {
+  const today = startOfUtcDay(referenceDate)
+
+  return allTrips.reduce<TripBuckets>(
+    (acc, trip) => {
+      const start = parseDateUtc(trip.startDate)
+      const end = parseDateUtc(trip.endDate)
+
+      if (today < start) {
+        acc.future.push(trip)
+      } else if (today > end) {
+        acc.past.push(trip)
+      } else {
+        acc.current.push(trip)
+      }
+
+      return acc
+    },
+    { future: [], current: [], past: [] }
+  )
 }

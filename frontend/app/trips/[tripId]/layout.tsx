@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation"
 
-import { TripShell } from "@/components/trips/trip-shell"
+import { TripLayoutClient } from "@/components/trips/trip-layout-client"
 import { getTripById } from "@/lib/trips"
 
 export default async function TripLayout({
@@ -15,5 +15,9 @@ export default async function TripLayout({
 
   if (!trip) notFound()
 
-  return <TripShell trip={trip}>{children}</TripShell>
+  return (
+    <TripLayoutClient tripId={tripId} serverTrip={trip}>
+      {children}
+    </TripLayoutClient>
+  )
 }

@@ -27,6 +27,12 @@ import {
 } from "@/components/ui/sidebar"
 import type { Trip } from "@/lib/trips"
 
+const TripPageContext = React.createContext<Trip | null>(null)
+
+export function useTripPage(): Trip | null {
+  return React.useContext(TripPageContext)
+}
+
 const pageCopy: Record<string, { title: string; subtitle: string }> = {
   overview: {
     title: "Trip Overview",
@@ -82,6 +88,7 @@ export function TripShell({
   const header = pageCopy[pageKey] || pageCopy.overview
 
   return (
+    <TripPageContext.Provider value={trip}>
     <SidebarProvider>
       <Sidebar collapsible="icon" variant="inset">
         <SidebarHeader>
@@ -154,5 +161,6 @@ export function TripShell({
         </div>
       </SidebarInset>
     </SidebarProvider>
+    </TripPageContext.Provider>
   )
 }

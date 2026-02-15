@@ -1,6 +1,9 @@
+"use client"
+
 import Link from "next/link"
 import { CheckCircle2Icon, Share2Icon, UserPlusIcon } from "lucide-react"
 
+import { useTripPage } from "@/components/trips/trip-shell"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -18,7 +21,9 @@ const progressSteps = [
   "Ready",
 ]
 
-export function OverviewPageContent({ trip }: { trip: Trip }) {
+export function OverviewPageContent({ trip: tripProp }: { trip: Trip }) {
+  const fromContext = useTripPage()
+  const trip = fromContext ?? tripProp
   const nextStep = getNextStep(trip)
   const missing = getMissingChecklist(trip)
 

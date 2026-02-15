@@ -10,7 +10,7 @@ Build an all-in-one travel platform for first-time travelers that plans, books, 
 - **Frontend:** Next.js (React) + TypeScript
 - **Styling & Motion:** TailwindCSS + Framer Motion
 - **Backend:** Node.js (Next.js API routes or NestJS)
-- **Database:** PostgreSQL
+- **Database:** PostgreSQL + Supabase
 - **Cache & Jobs:** Redis + BullMQ
 - **Maps:** Google Maps JS SDK
 

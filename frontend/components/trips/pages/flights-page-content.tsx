@@ -245,7 +245,6 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   const fromContext = useTripPage()
   const trip = fromContext ?? tripProp
 
-  const [activeTab, setActiveTab] = useState<"manual" | "explore">("manual")
   const [tripType, setTripType] = useState<TripType>("round_trip")
 
   // Manual: one-way
@@ -1126,18 +1125,11 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
 
   return (
     <div className="space-y-6">
-      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "manual" | "explore")}>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <TabsList variant="default" className="w-full max-w-md">
-            <TabsTrigger value="manual" className="flex-1">
-              <SearchIcon className="size-3.5" />
-              Manual search
-            </TabsTrigger>
-            <TabsTrigger value="explore" className="flex-1">
-              <CalendarIcon className="size-3.5" />
-              Explore (cheapest dates)
-            </TabsTrigger>
-          </TabsList>
+          <div className="inline-flex items-center gap-2 text-sm font-medium">
+            <SearchIcon className="size-3.5" />
+            Manual search
+          </div>
           <div className="flex items-center gap-2">
             <span className="text-muted-foreground text-xs font-medium">API:</span>
             <div className="border-input flex rounded-none border bg-muted/30 p-0.5">
@@ -1169,7 +1161,7 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
           </div>
         </div>
 
-        <TabsContent value="manual" className="mt-4 space-y-6">
+        <div className="mt-4 space-y-6">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -2023,276 +2015,7 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
               </CardContent>
             </Card>
           )}
-        </TabsContent>
-
-        <TabsContent value="explore" className="mt-4 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CalendarIcon className="size-4" />
-                Explore cheapest dates
-              </CardTitle>
-              <p className="text-muted-foreground text-xs">
-                See the cheapest flights for the next X days. Leave &quot;To&quot; empty to explore multiple destinations.
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="space-y-2">
-                  <Label>From</Label>
-                  <DestinationSearch
-                    placeholder="City or airport"
-                    value={expOrigin?.displayName}
-                    onChange={(v) =>
-                      setExpOrigin((prev) =>
-                        prev ? { ...prev, displayName: v } : null
-                      )
-                    }
-                    onSelect={((s: DestinationSuggestion) =>
-                      setPlace(setExpOrigin)(s)) as (suggestion: DestinationSuggestion) => void}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>To (optional)</Label>
-                  <DestinationSearch
-                    placeholder="Leave empty for multiple destinations"
-                    value={expDestination?.displayName}
-                    onChange={(v) =>
-                      setExpDestination((prev) =>
-                        prev ? { ...prev, displayName: v } : null
-                      )
-                    }
-                    onSelect={((s: DestinationSuggestion) =>
-                      setPlace(setExpDestination)(s)) as (suggestion: DestinationSuggestion) => void}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Number of days to check</Label>
-                  <select
-                    value={expNumDays}
-                    onChange={(e) => setExpNumDays(Number(e.target.value))}
-                    className="border-input bg-background h-9 w-full rounded-none border px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
-                  >
-                    {[3, 5, 7, 10, 14].map((n) => (
-                      <option key={n} value={n}>
-                        {n} days
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              {expError && (
-                <p className="text-destructive text-xs" role="alert">
-                  {expError}
-                </p>
-              )}
-              <Button onClick={handleExploreSearch} disabled={expLoading}>
-                {expLoading ? (
-                  <>
-                    <Loader2Icon className="size-4 animate-spin" />
-                    Checking dates…
-                  </>
-                ) : (
-                  <>
-                    <CalendarIcon className="size-4" />
-                    Find cheapest dates
-                  </>
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-
-          {expResults && expResults.rows.length > 0 && (
-            <div className="space-y-3">
-              <h2 className="text-sm font-semibold">
-                Cheapest flights
-                {expDestination?.displayName
-                  ? ` to ${expDestination.displayName}`
-                  : " (from your origin)"}
-              </h2>
-              <div className="border-border flex flex-wrap items-center gap-3 rounded-none border bg-muted/30 p-3">
-                <span className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
-                  <FilterIcon className="size-3.5" />
-                  Filters
-                </span>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Label className="text-xs">Airline</Label>
-                  <select
-                    value={expFilterAirline}
-                    onChange={(e) => setExpFilterAirline(e.target.value)}
-                    className="border-input bg-background h-8 min-w-[120px] rounded-none border px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
-                  >
-                    <option value="">All</option>
-                    {expAirlines.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Label className="text-xs">Max price</Label>
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
-                    placeholder="No limit"
-                    value={expFilterMaxPrice}
-                    onChange={(e) => setExpFilterMaxPrice(e.target.value)}
-                    className="border-input bg-background h-8 w-24 rounded-none border px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
-                  />
-                </div>
-              </div>
-              <div className="border-border overflow-x-auto rounded-none border">
-                <table className="w-full min-w-[520px] text-xs">
-                  <thead>
-                    <tr className="border-border bg-muted/50 border-b">
-                      <SortableTh
-                        sortKey="destination"
-                        currentSortBy={expSortBy}
-                        currentSortDir={expSortDir}
-                        label="Destination"
-                        onSort={handleExpSort}
-                      />
-                      <SortableTh
-                        sortKey="date"
-                        currentSortBy={expSortBy}
-                        currentSortDir={expSortDir}
-                        label="Date"
-                        onSort={handleExpSort}
-                      />
-                      <SortableTh
-                        sortKey="stops"
-                        currentSortBy={expSortBy}
-                        currentSortDir={expSortDir}
-                        label="Stops"
-                        onSort={handleExpSort}
-                      />
-                      <SortableTh
-                        sortKey="cost"
-                        currentSortBy={expSortBy}
-                        currentSortDir={expSortDir}
-                        label="Cost"
-                        onSort={handleExpSort}
-                      />
-                      <SortableTh
-                        sortKey="airline"
-                        currentSortBy={expSortBy}
-                        currentSortDir={expSortDir}
-                        label="Airline"
-                        onSort={handleExpSort}
-                      />
-                      <th className="w-0 p-2" />
-                      <th className="w-0 p-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {expFilteredAndSortedRows.map((row) => {
-                      const { date, destinationName, offer } = row
-                      const rowKey = `${row.destination}-${date}-${offer.id}`
-                      const airlineName = offer.owner?.name ?? "Airline"
-                      const selected = expSelectedOfferId === offer.id
-                      const hasStops = getStopsCount(offer) >= 1
-                      const isExpanded = expandedExpRowKeys.has(rowKey)
-                      const stopDetails = getStopDetails(offer)
-                      return (
-                        <Fragment key={rowKey}>
-                          <tr
-                            className={cn(
-                              "border-border border-b last:border-b-0",
-                              selected && "bg-primary/5"
-                            )}
-                          >
-                            <td className="p-2">{destinationName}</td>
-                            <td className="p-2 text-muted-foreground">
-                              {formatDate(date)}
-                            </td>
-                            <td className="p-2 text-muted-foreground">
-                              {hasStops ? (
-                                <button
-                                  type="button"
-                                  onClick={() => toggleExpExpanded(rowKey)}
-                                  className="inline-flex items-center gap-1 hover:underline focus:outline-none focus:ring-1 focus:ring-ring rounded"
-                                >
-                                  {getStopsLabel(offer)}
-                                  {isExpanded ? (
-                                    <ChevronUpIcon className="size-3.5" />
-                                  ) : (
-                                    <ChevronDownIcon className="size-3.5" />
-                                  )}
-                                </button>
-                              ) : (
-                                getStopsLabel(offer)
-                              )}
-                            </td>
-                            <td className="p-2 font-medium">
-                              {offer.totalAmount} {offer.totalCurrency}
-                            </td>
-                            <td className="p-2">{airlineName}</td>
-                            <td className="p-2">
-                              <Button
-                                variant={selected ? "secondary" : "outline"}
-                                size="sm"
-                                className="rounded-none"
-                                onClick={() =>
-                                  setExpSelectedOfferId((id) =>
-                                    id === offer.id ? null : offer.id
-                                  )
-                                }
-                              >
-                                {selected ? <CheckIcon className="size-3.5" /> : "Select"}
-                              </Button>
-                            </td>
-                            <td className="p-2">
-                              <Button
-                                variant="default"
-                                size="sm"
-                                className="rounded-none"
-                                onClick={() => saveFlightChoice(offer, "explore")}
-                              >
-                                Save
-                              </Button>
-                            </td>
-                          </tr>
-                          {hasStops && isExpanded && stopDetails.length > 0 && (
-                            <tr className="border-border border-b bg-muted/20 last:border-b-0">
-                              <td colSpan={7} className="p-2 pl-4 text-muted-foreground">
-                                <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
-                                  {stopDetails.map((s, i) => (
-                                    <li key={i}>
-                                      Stop {s.stopIndex}
-                                      {offer.slices.length > 1 && ` (leg ${s.sliceIndex + 1})`}:{" "}
-                                      <span className="font-medium text-foreground/80">
-                                        {s.airportCode || s.airportName}
-                                      </span>
-                                      {s.airportCode && s.airportName !== s.airportCode && (
-                                        <span> — {s.airportName}</span>
-                                      )}
-                                      {" · "}
-                                      <span className="italic">
-                                        {formatLayover(s.layoverMinutes)} layover
-                                      </span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </td>
-                            </tr>
-                          )}
-                        </Fragment>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-          {expResults && expResults.rows.length === 0 && (
-            <p className="text-muted-foreground text-sm">
-              No flights found for the selected dates.
-            </p>
-          )}
-        </TabsContent>
-      </Tabs>
+        </div>
       {savedFlights.length > 0 && (
         <Card>
           <CardHeader>

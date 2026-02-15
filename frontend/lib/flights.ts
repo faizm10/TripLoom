@@ -3,6 +3,8 @@ export type FlightOffer = {
   totalAmount: string
   totalCurrency: string
   owner: { name: string; iataCode: string }
+  /** When set (e.g. SerpAPI), use this for Book instead of airline URL */
+  bookUrl?: string
   slices: {
     origin: { name: string; iataCode: string; cityName?: string }
     destination: { name: string; iataCode: string; cityName?: string }

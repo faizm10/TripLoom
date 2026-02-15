@@ -27,6 +27,50 @@ import { getAirlineBookingUrl } from "@/lib/airline-booking-urls"
 function getBookUrl(offer: FlightOffer): string {
   return offer.bookUrl ?? getAirlineBookingUrl(offer.owner?.iataCode ?? "")
 }
+
+/** Submit SerpAPI booking redirect (form POST to Google) so user lands on pre-selected flight. */
+async function submitBookingRedirect(offer: FlightOffer): Promise<void> {
+  const token = offer.bookingToken ?? offer.departureToken
+  if (token) {
+    const res = await fetch("/api/flights/serp/booking-options", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        offer.bookingToken
+          ? { booking_token: offer.bookingToken }
+          : { departure_token: offer.departureToken }
+      ),
+    })
+    const data = await res.json().catch(() => null)
+    if (!res.ok || !data?.ok || !data?.url) {
+      const fallback = getBookUrl(offer)
+      window.open(fallback, "_blank")
+      return
+    }
+    const form = document.createElement("form")
+    form.method = "POST"
+    form.action = data.url
+    form.target = "_blank"
+    if (data.post_data && typeof data.post_data === "string") {
+      data.post_data.split("&").forEach((pair: string) => {
+        const eq = pair.indexOf("=")
+        const name = eq === -1 ? pair : pair.slice(0, eq)
+        const value = eq === -1 ? "" : pair.slice(eq + 1)
+        const input = document.createElement("input")
+        input.type = "hidden"
+        input.name = name
+        input.value = value
+        form.appendChild(input)
+      })
+    }
+    document.body.appendChild(form)
+    form.submit()
+    document.body.removeChild(form)
+    return
+  }
+  window.open(getBookUrl(offer), "_blank")
+}
+
 import type { Trip } from "@/lib/trips"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -244,6 +288,15 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   const [mounted, setMounted] = useState(false)
   const [expandedManualOfferIds, setExpandedManualOfferIds] = useState<Set<string>>(new Set())
   const [expandedExpRowKeys, setExpandedExpRowKeys] = useState<Set<string>>(new Set())
+  // SerpAPI round trip two-step: outbound selected → load return flights
+  const [selectedOutboundOfferId, setSelectedOutboundOfferId] = useState<string | null>(null)
+  const [returnOffers, setReturnOffers] = useState<FlightOffer[]>([])
+  const [returnLoading, setReturnLoading] = useState(false)
+  const [returnError, setReturnError] = useState<string | null>(null)
+  const [selectedReturnOfferId, setSelectedReturnOfferId] = useState<string | null>(null)
+  const [expandedReturnOfferIds, setExpandedReturnOfferIds] = useState<Set<string>>(new Set())
+  // Tab flow for SerpAPI round trip: Outbound → Return → Summary
+  const [flightStepTab, setFlightStepTab] = useState<"outbound" | "return" | "summary">("outbound")
   useEffect(() => setMounted(true), [])
 
   const toggleManualExpanded = (offerId: string) => {
@@ -262,6 +315,83 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
       return next
     })
   }
+  const toggleReturnExpanded = (offerId: string) => {
+    setExpandedReturnOfferIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(offerId)) next.delete(offerId)
+      else next.add(offerId)
+      return next
+    })
+  }
+
+  const isSerpRoundTripTwoStep =
+    flightApi === "serpapi" &&
+    tripType === "round_trip" &&
+    returnDate.trim() !== ""
+
+  const selectedOutboundOffer =
+    selectedOutboundOfferId != null
+      ? offers.find((o) => o.id === selectedOutboundOfferId)
+      : null
+  const selectedReturnOffer =
+    selectedReturnOfferId != null
+      ? returnOffers.find((o) => o.id === selectedReturnOfferId)
+      : null
+  const offerForBook =
+    isSerpRoundTripTwoStep && selectedReturnOffer != null
+      ? selectedReturnOffer
+      : offers.find((o) => o.id === selectedOfferId) ?? null
+
+  const fetchReturnFlights = async (outboundOffer: FlightOffer) => {
+    const token = outboundOffer.departureToken
+    if (!token || !origin?.iataCode || !destination?.iataCode || !departureDate.trim() || !returnDate.trim()) return
+    setReturnLoading(true)
+    setReturnError(null)
+    setReturnOffers([])
+    setSelectedReturnOfferId(null)
+    try {
+      const res = await fetch("/api/flights/serp/return-flights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          departure_token: token,
+          outbound_date: departureDate.trim(),
+          return_date: returnDate.trim(),
+          departure_id: destination.iataCode,
+          arrival_id: origin.iataCode,
+          adults,
+          outbound_offer_id: outboundOffer.id,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setReturnError(data?.error ?? "Failed to load return flights")
+        return
+      }
+      setReturnOffers(data?.offers ?? [])
+    } catch (e) {
+      setReturnError(e instanceof Error ? e.message : "Failed to load return flights")
+    } finally {
+      setReturnLoading(false)
+    }
+  }
+
+  // When user opens Return tab, load return flights if we have a selected outbound and none loaded yet
+  useEffect(() => {
+    if (
+      flightStepTab !== "return" ||
+      !isSerpRoundTripTwoStep ||
+      !selectedOutboundOffer ||
+      returnLoading ||
+      returnOffers.length > 0 ||
+      returnError != null
+    ) return
+    fetchReturnFlights(selectedOutboundOffer)
+  }, [flightStepTab, isSerpRoundTripTwoStep, selectedOutboundOffer?.id])
+
+  useEffect(() => {
+    if (!isSerpRoundTripTwoStep) setFlightStepTab("outbound")
+  }, [isSerpRoundTripTwoStep])
 
   const setPlace =
     (setter: (p: Place | null) => void) =>
@@ -442,6 +572,10 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
     setOffers([])
     setSearched(false)
     setSelectedOfferId(null)
+    setSelectedOutboundOfferId(null)
+    setReturnOffers([])
+    setReturnError(null)
+    setSelectedReturnOfferId(null)
     try {
       const endpoint =
         flightApi === "serpapi" ? "/api/flights/serp/search" : "/api/flights/search"
@@ -450,7 +584,9 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
         adults,
         cabin_class: "economy",
       }
+      // SerpAPI round trip: send return_date so SerpAPI returns departure_token on each offer
       if (flightApi === "serpapi" && tripType === "round_trip" && slices[1]) {
+        payload.slices = [slices[0]]
         payload.return_date = slices[1].departure_date
       }
       const res = await fetch(endpoint, {
@@ -860,11 +996,13 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
           {offers.length > 0 && (
             <div className="space-y-3">
               <h2 className="text-sm font-semibold">
-                Results
+                {isSerpRoundTripTwoStep ? "Outbound flights" : "Results"}
                 {tripType === "one_way" &&
                   `: ${origin?.displayName ?? origin?.iataCode} → ${destination?.displayName ?? destination?.iataCode}`}
-                {tripType === "round_trip" &&
+                {tripType === "round_trip" && !isSerpRoundTripTwoStep &&
                   `: ${origin?.displayName ?? origin?.iataCode} ↔ ${destination?.displayName ?? destination?.iataCode}`}
+                {isSerpRoundTripTwoStep &&
+                  `: ${origin?.displayName ?? origin?.iataCode} → ${destination?.displayName ?? destination?.iataCode}`}
               </h2>
               <div className="border-border flex flex-wrap items-center gap-3 rounded-none border bg-muted/30 p-3">
                 <span className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
@@ -899,7 +1037,34 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                   />
                 </div>
               </div>
-              <div className="border-border overflow-x-auto rounded-none border">
+              {isSerpRoundTripTwoStep ? (
+                <Tabs
+                  value={flightStepTab}
+                  onValueChange={(v) =>
+                    setFlightStepTab(v as "outbound" | "return" | "summary")
+                  }
+                >
+                  <TabsList className="mb-3 w-full max-w-sm">
+                    <TabsTrigger value="outbound" className="rounded-none">
+                      Outbound
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="return"
+                      disabled={!selectedOutboundOffer}
+                      className="rounded-none"
+                    >
+                      Return
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="summary"
+                      disabled={!selectedReturnOffer}
+                      className="rounded-none"
+                    >
+                      Summary
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="outbound" className="mt-0 space-y-3">
+                    <div className="border-border overflow-x-auto rounded-none border">
                 <table className="w-full min-w-[640px] text-xs">
                   <thead>
                     <tr className="border-border bg-muted/50 border-b">
@@ -968,7 +1133,9 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                       const row = getOfferRow(offer)
                       const airlineName = offer.owner?.name ?? "Airline"
                       const bookUrl = getBookUrl(offer)
-                      const selected = selectedOfferId === offer.id
+                      const selectedOutbound = isSerpRoundTripTwoStep && selectedOutboundOfferId === offer.id
+                      const selected = !isSerpRoundTripTwoStep && selectedOfferId === offer.id
+                      const selectedAny = selected || selectedOutbound
                       const hasStops = getStopsCount(offer) >= 1
                       const isExpanded = expandedManualOfferIds.has(offer.id)
                       const stopDetails = getStopDetails(offer)
@@ -977,7 +1144,7 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                           <tr
                             className={cn(
                               "border-border border-b last:border-b-0",
-                              selected && "bg-primary/5"
+                              selectedAny && "bg-primary/5"
                             )}
                           >
                             <td className="p-2">{row.route}</td>
@@ -1008,31 +1175,71 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                             </td>
                             <td className="p-2">{airlineName}</td>
                             <td className="p-2">
-                              <Button
-                                variant={selected ? "secondary" : "outline"}
-                                size="sm"
-                                className="rounded-none"
-                                onClick={() =>
-                                  setSelectedOfferId((id) =>
-                                    id === offer.id ? null : offer.id
-                                  )
-                                }
-                              >
-                                {selected ? <CheckIcon className="size-3.5" /> : "Select"}
-                              </Button>
+                              {isSerpRoundTripTwoStep ? (
+                                <Button
+                                  variant={selectedOutbound ? "secondary" : "outline"}
+                                  size="sm"
+                                  className="rounded-none"
+                                  disabled={!offer.departureToken}
+                                  onClick={() => {
+                                    const next = selectedOutboundOfferId === offer.id ? null : offer.id
+                                    setSelectedOutboundOfferId(next)
+                                    setSelectedOfferId(null)
+                                    if (next && offer.departureToken) {
+                                      fetchReturnFlights(offer)
+                                    } else {
+                                      setReturnOffers([])
+                                      setSelectedReturnOfferId(null)
+                                      setFlightStepTab("outbound")
+                                    }
+                                  }}
+                                >
+                                  {selectedOutbound ? <CheckIcon className="size-3.5" /> : "Select outbound"}
+                                </Button>
+                              ) : (
+                                <Button
+                                  variant={selected ? "secondary" : "outline"}
+                                  size="sm"
+                                  className="rounded-none"
+                                  onClick={() =>
+                                    setSelectedOfferId((id) =>
+                                      id === offer.id ? null : offer.id
+                                    )
+                                  }
+                                >
+                                  {selected ? <CheckIcon className="size-3.5" /> : "Select"}
+                                </Button>
+                              )}
                             </td>
                             <td className="p-2">
-                              <Button asChild variant="default" size="sm" className="rounded-none">
-                                <a
-                                  href={bookUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1"
-                                >
-                                  Book
-                                  <ExternalLinkIcon className="size-3.5" />
-                                </a>
-                              </Button>
+                              {!isSerpRoundTripTwoStep && (
+                                offer.bookingToken ? (
+                                  <Button
+                                    variant="default"
+                                    size="sm"
+                                    className="rounded-none inline-flex items-center gap-1"
+                                    onClick={() => submitBookingRedirect(offer)}
+                                  >
+                                    Book
+                                    <ExternalLinkIcon className="size-3.5" />
+                                  </Button>
+                                ) : (
+                                  <Button asChild variant="default" size="sm" className="rounded-none">
+                                    <a
+                                      href={bookUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="inline-flex items-center gap-1"
+                                    >
+                                      Book
+                                      <ExternalLinkIcon className="size-3.5" />
+                                    </a>
+                                  </Button>
+                                )
+                              )}
+                              {isSerpRoundTripTwoStep && (
+                                <span className="text-muted-foreground text-xs">—</span>
+                              )}
                             </td>
                           </tr>
                           {hasStops && isExpanded && stopDetails.length > 0 && (
@@ -1068,27 +1275,340 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                   </tbody>
                 </table>
               </div>
-              {selectedOfferId && (
-                <div className="bg-muted/50 border-border sticky bottom-2 flex flex-wrap items-center justify-between gap-2 rounded-none border p-3">
-                  <span className="text-xs font-medium">
-                    Selected:{" "}
-                    {offers.find((o) => o.id === selectedOfferId)?.owner?.name} —{" "}
-                    {offers.find((o) => o.id === selectedOfferId)?.totalAmount}{" "}
-                    {offers.find((o) => o.id === selectedOfferId)?.totalCurrency}
-                  </span>
-                  <Button asChild size="sm" className="rounded-none">
-                    <a
-                      href={getBookUrl(
-                        offers.find((o) => o.id === selectedOfferId) ?? ({} as FlightOffer)
+                    {selectedOutboundOffer && (
+                      <Button
+                        className="rounded-none"
+                        onClick={() => {
+                          fetchReturnFlights(selectedOutboundOffer)
+                          setFlightStepTab("return")
+                        }}
+                      >
+                        Continue to return flights
+                        <ArrowDownIcon className="ml-1 size-3.5" />
+                      </Button>
+                    )}
+                  </TabsContent>
+                  <TabsContent value="return" className="mt-0 space-y-3">
+                    <h3 className="text-sm font-semibold">
+                      Return flights ({destination?.iataCode ?? ""} → {origin?.iataCode ?? ""}) — {returnDate}
+                    </h3>
+                    {returnLoading && (
+                      <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                        <Loader2Icon className="size-4 animate-spin" />
+                        Loading return options…
+                      </div>
+                    )}
+                    {returnError && (
+                      <p className="text-destructive text-sm">{returnError}</p>
+                    )}
+                    {!returnLoading && returnOffers.length === 0 && !returnError && selectedOutboundOffer != null && (
+                      <p className="text-muted-foreground rounded-none border border-border bg-muted/20 px-3 py-4 text-sm">
+                        No return flights found for this date. Try a different return date or search again.
+                      </p>
+                    )}
+                    {!returnLoading && returnOffers.length > 0 && (
+                      <>
+                        <div className="border-border overflow-x-auto rounded-none border">
+                          <table className="w-full min-w-[640px] text-xs">
+                            <thead>
+                              <tr className="border-border bg-muted/50 border-b">
+                                <th className="text-left p-2 font-medium">Route</th>
+                                <th className="text-left p-2 font-medium">Date</th>
+                                <th className="text-left p-2 font-medium">Departure</th>
+                                <th className="text-left p-2 font-medium">Arrival</th>
+                                <th className="text-left p-2 font-medium">Duration</th>
+                                <th className="text-left p-2 font-medium">Stops</th>
+                                <th className="text-left p-2 font-medium">Cost</th>
+                                <th className="text-left p-2 font-medium">Airline</th>
+                                <th className="w-0 p-2" />
+                                <th className="w-0 p-2" />
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {returnOffers.map((offer) => {
+                                const row = getOfferRow(offer)
+                                const airlineName = offer.owner?.name ?? "Airline"
+                                const bookUrlRet = getBookUrl(offer)
+                                const selectedRet = selectedReturnOfferId === offer.id
+                                const hasStopsRet = getStopsCount(offer) >= 1
+                                const isExpandedRet = expandedReturnOfferIds.has(offer.id)
+                                const stopDetailsRet = getStopDetails(offer)
+                                return (
+                                  <Fragment key={offer.id}>
+                                    <tr
+                                      className={cn(
+                                        "border-border border-b last:border-b-0",
+                                        selectedRet && "bg-primary/5"
+                                      )}
+                                    >
+                                      <td className="p-2">{row.route}</td>
+                                      <td className="p-2 text-muted-foreground">{row.dateStr}</td>
+                                      <td className="p-2">{row.departure}</td>
+                                      <td className="p-2">{row.arrival}</td>
+                                      <td className="p-2">{row.duration}</td>
+                                      <td className="p-2 text-muted-foreground">
+                                        {hasStopsRet ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => toggleReturnExpanded(offer.id)}
+                                            className="inline-flex items-center gap-1 hover:underline focus:outline-none focus:ring-1 focus:ring-ring rounded"
+                                          >
+                                            {getStopsLabel(offer)}
+                                            {isExpandedRet ? (
+                                              <ChevronUpIcon className="size-3.5" />
+                                            ) : (
+                                              <ChevronDownIcon className="size-3.5" />
+                                            )}
+                                          </button>
+                                        ) : (
+                                          getStopsLabel(offer)
+                                        )}
+                                      </td>
+                                      <td className="p-2 font-medium">
+                                        {offer.totalAmount} {offer.totalCurrency}
+                                      </td>
+                                      <td className="p-2">{airlineName}</td>
+                                      <td className="p-2">
+                                        <Button
+                                          variant={selectedRet ? "secondary" : "outline"}
+                                          size="sm"
+                                          className="rounded-none"
+                                          onClick={() =>
+                                            setSelectedReturnOfferId((id) =>
+                                              id === offer.id ? null : offer.id
+                                            )
+                                          }
+                                        >
+                                          {selectedRet ? <CheckIcon className="size-3.5" /> : "Select"}
+                                        </Button>
+                                      </td>
+                                      <td className="p-2">
+                                        {offer.bookingToken ? (
+                                          <Button
+                                            variant="default"
+                                            size="sm"
+                                            className="rounded-none inline-flex items-center gap-1"
+                                            onClick={() => submitBookingRedirect(offer)}
+                                          >
+                                            Book
+                                            <ExternalLinkIcon className="size-3.5" />
+                                          </Button>
+                                        ) : (
+                                          <Button asChild variant="default" size="sm" className="rounded-none">
+                                            <a
+                                              href={bookUrlRet}
+                                              target="_blank"
+                                              rel="noopener noreferrer"
+                                              className="inline-flex items-center gap-1"
+                                            >
+                                              Book
+                                              <ExternalLinkIcon className="size-3.5" />
+                                            </a>
+                                          </Button>
+                                        )}
+                                      </td>
+                                    </tr>
+                                    {hasStopsRet && isExpandedRet && stopDetailsRet.length > 0 && (
+                                      <tr
+                                        key={`${offer.id}-stops`}
+                                        className="border-border border-b bg-muted/20 last:border-b-0"
+                                      >
+                                        <td colSpan={10} className="p-2 pl-4 text-muted-foreground">
+                                          <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+                                            {stopDetailsRet.map((s, i) => (
+                                              <li key={i}>
+                                                Stop {s.stopIndex}:{" "}
+                                                <span className="font-medium text-foreground/80">
+                                                  {s.airportCode || s.airportName}
+                                                </span>
+                                                {" · "}
+                                                <span className="italic">
+                                                  {formatLayover(s.layoverMinutes)} layover
+                                                </span>
+                                              </li>
+                                            ))}
+                                          </ul>
+                                        </td>
+                                      </tr>
+                                    )}
+                                  </Fragment>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                        {selectedReturnOffer && (
+                          <Button
+                            className="rounded-none"
+                            onClick={() => setFlightStepTab("summary")}
+                          >
+                            Continue to summary
+                            <ArrowDownIcon className="ml-1 size-3.5" />
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </TabsContent>
+                  <TabsContent value="summary" className="mt-0 space-y-3">
+                    {selectedOutboundOffer && (
+                      <div className="border-border rounded-none border bg-muted/20 p-3">
+                        <p className="text-muted-foreground mb-1 text-xs font-medium">Outbound</p>
+                        <p className="text-sm">
+                          {getOfferRow(selectedOutboundOffer).route} · {getOfferRow(selectedOutboundOffer).dateStr} · {selectedOutboundOffer.owner?.name} — {selectedOutboundOffer.totalAmount} {selectedOutboundOffer.totalCurrency}
+                        </p>
+                      </div>
+                    )}
+                    {selectedReturnOffer && (
+                      <div className="border-border rounded-none border bg-muted/20 p-3">
+                        <p className="text-muted-foreground mb-1 text-xs font-medium">Return</p>
+                        <p className="text-sm">
+                          {getOfferRow(selectedReturnOffer).route} · {getOfferRow(selectedReturnOffer).dateStr} · {selectedReturnOffer.owner?.name} — {selectedReturnOffer.totalAmount} {selectedReturnOffer.totalCurrency}
+                        </p>
+                      </div>
+                    )}
+                    {offerForBook != null && (
+                      <div className="bg-muted/50 border-border sticky bottom-2 flex flex-wrap items-center justify-between gap-2 rounded-none border p-3">
+                        <span className="text-xs font-medium">
+                          Outbound + Return: {offerForBook.owner?.name} — {offerForBook.totalAmount} {offerForBook.totalCurrency}
+                        </span>
+                        {offerForBook.bookingToken ? (
+                          <Button
+                            size="sm"
+                            className="rounded-none"
+                            onClick={() => submitBookingRedirect(offerForBook)}
+                          >
+                            Book on airline
+                            <ExternalLinkIcon className="ml-1 size-3.5" />
+                          </Button>
+                        ) : (
+                          <Button asChild size="sm" className="rounded-none">
+                            <a
+                              href={getBookUrl(offerForBook)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              Book on airline
+                              <ExternalLinkIcon className="ml-1 size-3.5" />
+                            </a>
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
+              ) : (
+                <>
+                  <div className="border-border overflow-x-auto rounded-none border">
+                    <table className="w-full min-w-[640px] text-xs">
+                      <thead>
+                        <tr className="border-border bg-muted/50 border-b">
+                          <SortableTh sortKey="route" currentSortBy={manualSortBy} currentSortDir={manualSortDir} label="Route" onSort={handleManualSort} />
+                          <SortableTh sortKey="date" currentSortBy={manualSortBy} currentSortDir={manualSortDir} label="Date" onSort={handleManualSort} />
+                          <SortableTh sortKey="departure" currentSortBy={manualSortBy} currentSortDir={manualSortDir} label="Departure" onSort={handleManualSort} />
+                          <SortableTh sortKey="arrival" currentSortBy={manualSortBy} currentSortDir={manualSortDir} label="Arrival" onSort={handleManualSort} />
+                          <SortableTh sortKey="duration" currentSortBy={manualSortBy} currentSortDir={manualSortDir} label="Duration" onSort={handleManualSort} />
+                          <SortableTh sortKey="stops" currentSortBy={manualSortBy} currentSortDir={manualSortDir} label="Stops" onSort={handleManualSort} />
+                          <SortableTh sortKey="cost" currentSortBy={manualSortBy} currentSortDir={manualSortDir} label="Cost" onSort={handleManualSort} />
+                          <SortableTh sortKey="airline" currentSortBy={manualSortBy} currentSortDir={manualSortDir} label="Airline" onSort={handleManualSort} />
+                          <th className="w-0 p-2" />
+                          <th className="w-0 p-2" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {manualFilteredAndSortedOffers.map((offer) => {
+                          const row = getOfferRow(offer)
+                          const airlineName = offer.owner?.name ?? "Airline"
+                          const bookUrl = getBookUrl(offer)
+                          const selected = selectedOfferId === offer.id
+                          const hasStops = getStopsCount(offer) >= 1
+                          const isExpanded = expandedManualOfferIds.has(offer.id)
+                          const stopDetails = getStopDetails(offer)
+                          return (
+                            <Fragment key={offer.id}>
+                              <tr className={cn("border-border border-b last:border-b-0", selected && "bg-primary/5")}>
+                                <td className="p-2">{row.route}</td>
+                                <td className="p-2 text-muted-foreground">{row.dateStr}</td>
+                                <td className="p-2">{row.departure}</td>
+                                <td className="p-2">{row.arrival}</td>
+                                <td className="p-2">{row.duration}</td>
+                                <td className="p-2 text-muted-foreground">
+                                  {hasStops ? (
+                                    <button type="button" onClick={() => toggleManualExpanded(offer.id)} className="inline-flex items-center gap-1 hover:underline focus:outline-none focus:ring-1 focus:ring-ring rounded">
+                                      {getStopsLabel(offer)}
+                                      {isExpanded ? <ChevronUpIcon className="size-3.5" /> : <ChevronDownIcon className="size-3.5" />}
+                                    </button>
+                                  ) : (
+                                    getStopsLabel(offer)
+                                  )}
+                                </td>
+                                <td className="p-2 font-medium">{offer.totalAmount} {offer.totalCurrency}</td>
+                                <td className="p-2">{airlineName}</td>
+                                <td className="p-2">
+                                  <Button variant={selected ? "secondary" : "outline"} size="sm" className="rounded-none" onClick={() => setSelectedOfferId((id) => (id === offer.id ? null : offer.id))}>
+                                    {selected ? <CheckIcon className="size-3.5" /> : "Select"}
+                                  </Button>
+                                </td>
+                                <td className="p-2">
+                                  {offer.bookingToken ? (
+                                    <Button variant="default" size="sm" className="rounded-none inline-flex items-center gap-1" onClick={() => submitBookingRedirect(offer)}>
+                                      Book
+                                      <ExternalLinkIcon className="size-3.5" />
+                                    </Button>
+                                  ) : (
+                                    <Button asChild variant="default" size="sm" className="rounded-none">
+                                      <a href={bookUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1">
+                                        Book
+                                        <ExternalLinkIcon className="size-3.5" />
+                                      </a>
+                                    </Button>
+                                  )}
+                                </td>
+                              </tr>
+                              {hasStops && isExpanded && stopDetails.length > 0 && (
+                                <tr key={`${offer.id}-stops`} className="border-border border-b bg-muted/20 last:border-b-0">
+                                  <td colSpan={10} className="p-2 pl-4 text-muted-foreground">
+                                    <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+                                      {stopDetails.map((s, i) => (
+                                        <li key={i}>
+                                          Stop {s.stopIndex}
+                                          {offer.slices.length > 1 && ` (leg ${s.sliceIndex + 1})`}:{" "}
+                                          <span className="font-medium text-foreground/80">{s.airportCode || s.airportName}</span>
+                                          {s.airportCode && s.airportName !== s.airportCode && <span> — {s.airportName}</span>}
+                                          {" · "}
+                                          <span className="italic">{formatLayover(s.layoverMinutes)} layover</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {selectedOfferId && offerForBook != null && (
+                    <div className="bg-muted/50 border-border sticky bottom-2 flex flex-wrap items-center justify-between gap-2 rounded-none border p-3">
+                      <span className="text-xs font-medium">
+                        Selected: {offerForBook.owner?.name} — {offerForBook.totalAmount} {offerForBook.totalCurrency}
+                      </span>
+                      {offerForBook.bookingToken ? (
+                        <Button size="sm" className="rounded-none" onClick={() => submitBookingRedirect(offerForBook)}>
+                          Book on airline
+                          <ExternalLinkIcon className="ml-1 size-3.5" />
+                        </Button>
+                      ) : (
+                        <Button asChild size="sm" className="rounded-none">
+                          <a href={getBookUrl(offerForBook)} target="_blank" rel="noopener noreferrer">
+                            Book on airline
+                            <ExternalLinkIcon className="ml-1 size-3.5" />
+                          </a>
+                        </Button>
                       )}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Book on airline
-                      <ExternalLinkIcon className="ml-1 size-3.5" />
-                    </a>
-                  </Button>
-                </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -1322,17 +1842,29 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                               </Button>
                             </td>
                             <td className="p-2">
-                              <Button asChild variant="default" size="sm" className="rounded-none">
-                                <a
-                                  href={bookUrl}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="inline-flex items-center gap-1"
+                              {offer.bookingToken ? (
+                                <Button
+                                  variant="default"
+                                  size="sm"
+                                  className="rounded-none inline-flex items-center gap-1"
+                                  onClick={() => submitBookingRedirect(offer)}
                                 >
                                   Book
                                   <ExternalLinkIcon className="size-3.5" />
-                                </a>
-                              </Button>
+                                </Button>
+                              ) : (
+                                <Button asChild variant="default" size="sm" className="rounded-none">
+                                  <a
+                                    href={bookUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1"
+                                  >
+                                    Book
+                                    <ExternalLinkIcon className="size-3.5" />
+                                  </a>
+                                </Button>
+                              )}
                             </td>
                           </tr>
                           {hasStops && isExpanded && stopDetails.length > 0 && (

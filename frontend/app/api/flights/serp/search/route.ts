@@ -29,6 +29,7 @@ type SerpOffer = {
   price?: number
   type?: string
   departure_token?: string
+  booking_token?: string
 }
 
 type SerpResponse = {
@@ -79,7 +80,7 @@ function serpOfferToFlightOffer(
   const airlineName = first?.airline ?? "Airline"
   const totalDuration = serp.total_duration != null ? durationMinToStr(serp.total_duration) : ""
 
-  const segments = flights.map((f) => ({
+  const toSegment = (f: SerpFlight) => ({
     operatingCarrier: { name: f.airline ?? "", iataCode: "" },
     marketingCarrier: { name: f.airline ?? "", iataCode: "" },
     flightNumber: f.flight_number ?? "",
@@ -94,11 +95,91 @@ function serpOfferToFlightOffer(
       iataCode: f.arrival_airport?.id ?? "",
     },
     duration: f.duration != null ? durationMinToStr(f.duration) : "",
-  }))
+  })
 
-  const origin = first?.departure_airport
-  const destination = last?.arrival_airport
   const id = `serp-${index}-${serp.departure_token ?? index}`
+
+  let slices: FlightOffer["slices"]
+  if (!params.oneWay && params.returnDate && params.arrivalId && flights.length > 1) {
+    const arrivalIdUpper = params.arrivalId.toUpperCase()
+    const splitIndex = flights.findIndex(
+      (f) => (f.arrival_airport?.id ?? "").toUpperCase() === arrivalIdUpper
+    )
+    if (splitIndex >= 0 && splitIndex < flights.length - 1) {
+      const outboundFlights = flights.slice(0, splitIndex + 1)
+      const returnFlights = flights.slice(splitIndex + 1)
+      const outboundDur = outboundFlights.reduce((s, f) => s + (f.duration ?? 0), 0)
+      const returnDur = returnFlights.reduce((s, f) => s + (f.duration ?? 0), 0)
+      const obFirst = outboundFlights[0]
+      const obLast = outboundFlights[outboundFlights.length - 1]
+      const retFirst = returnFlights[0]
+      const retLast = returnFlights[returnFlights.length - 1]
+      slices = [
+        {
+          origin: {
+            name: obFirst?.departure_airport?.name ?? "",
+            iataCode: obFirst?.departure_airport?.id ?? "",
+            cityName: undefined,
+          },
+          destination: {
+            name: obLast?.arrival_airport?.name ?? "",
+            iataCode: obLast?.arrival_airport?.id ?? "",
+            cityName: undefined,
+          },
+          duration: durationMinToStr(outboundDur),
+          segments: outboundFlights.map(toSegment),
+        },
+        {
+          origin: {
+            name: retFirst?.departure_airport?.name ?? "",
+            iataCode: retFirst?.departure_airport?.id ?? "",
+            cityName: undefined,
+          },
+          destination: {
+            name: retLast?.arrival_airport?.name ?? "",
+            iataCode: retLast?.arrival_airport?.id ?? "",
+            cityName: undefined,
+          },
+          duration: durationMinToStr(returnDur),
+          segments: returnFlights.map(toSegment),
+        },
+      ]
+    } else {
+      slices = [
+        {
+          origin: {
+            name: first?.departure_airport?.name ?? "",
+            iataCode: first?.departure_airport?.id ?? "",
+            cityName: undefined,
+          },
+          destination: {
+            name: last?.arrival_airport?.name ?? "",
+            iataCode: last?.arrival_airport?.id ?? "",
+            cityName: undefined,
+          },
+          duration: totalDuration,
+          segments: flights.map(toSegment),
+        },
+      ]
+    }
+  } else {
+    slices = [
+      {
+        origin: {
+          name: first?.departure_airport?.name ?? "",
+          iataCode: first?.departure_airport?.id ?? "",
+          cityName: undefined,
+        },
+        destination: {
+          name: last?.arrival_airport?.name ?? "",
+          iataCode: last?.arrival_airport?.id ?? "",
+          cityName: undefined,
+        },
+        duration: totalDuration,
+        segments: flights.map(toSegment),
+      },
+    ]
+  }
 
   return {
     id,
@@ -112,22 +193,9 @@ function serpOfferToFlightOffer(
       returnDate: params.returnDate,
       oneWay: params.oneWay,
     }),
-    slices: [
-      {
-        origin: {
-          name: origin?.name ?? "",
-          iataCode: origin?.id ?? "",
-          cityName: undefined,
-        },
-        destination: {
-          name: destination?.name ?? "",
-          iataCode: destination?.id ?? "",
-          cityName: undefined,
-        },
-        duration: totalDuration,
-        segments,
-      },
-    ],
+    ...(serp.booking_token && { bookingToken: serp.booking_token }),
+    ...(serp.departure_token && { departureToken: serp.departure_token }),
+    slices,
     expiresAt: "",
   }
 }
@@ -210,6 +278,7 @@ export async function POST(request: Request) {
   const params = new URLSearchParams({
     engine: "google_flights",
     api_key: apiKey,
+    hl: "en",
     departure_id: departureId,
     arrival_id: arrivalId,
     outbound_date: outboundDate,

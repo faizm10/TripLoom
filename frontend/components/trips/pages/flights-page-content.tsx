@@ -1,11 +1,13 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 import {
   ArrowDownIcon,
   ArrowUpIcon,
   CalendarIcon,
   CheckIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   ExternalLinkIcon,
   FilterIcon,
   Loader2Icon,
@@ -97,14 +99,69 @@ function getOfferRow(offer: FlightOffer) {
   return { route, dateStr: dates, departure, arrival, duration }
 }
 
+function getStopsLabel(offer: FlightOffer): string {
+  const parts = offer.slices.map((slice) => {
+    const n = Math.max(0, (slice.segments?.length ?? 1) - 1)
+    if (n === 0) return "Non-stop"
+    if (n === 1) return "1 stop"
+    return `${n} stops`
+  })
+  return parts.join(" · ")
+}
+
+function getStopsCount(offer: FlightOffer): number {
+  return offer.slices.reduce(
+    (sum, slice) => sum + Math.max(0, (slice.segments?.length ?? 1) - 1),
+    0
+  )
+}
+
+type StopDetail = {
+  sliceIndex: number
+  stopIndex: number
+  airportCode: string
+  airportName: string
+  layoverMinutes: number
+}
+
+function getStopDetails(offer: FlightOffer): StopDetail[] {
+  const out: StopDetail[] = []
+  offer.slices.forEach((slice, sliceIndex) => {
+    const segs = slice.segments ?? []
+    for (let i = 0; i < segs.length - 1; i++) {
+      const arr = segs[i]
+      const dep = segs[i + 1]
+      const dest = arr.destination
+      const arrTime = arr.arrivingAt ? new Date(arr.arrivingAt).getTime() : 0
+      const depTime = dep.departingAt ? new Date(dep.departingAt).getTime() : 0
+      const layoverMinutes = arrTime && depTime ? Math.round((depTime - arrTime) / 60000) : 0
+      out.push({
+        sliceIndex,
+        stopIndex: i + 1,
+        airportCode: dest?.iataCode ?? "",
+        airportName: dest?.name ?? dest?.iataCode ?? "—",
+        layoverMinutes,
+      })
+    }
+  })
+  return out
+}
+
+function formatLayover(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return m > 0 ? `${h}h ${m}m` : `${h}h`
+}
+
 function durationToMinutes(d: string): number {
   const h = d.match(/(\d+)h/)?.[1]
   const m = d.match(/(\d+)m/)?.[1]
   return (parseInt(h ?? "0", 10) * 60) + parseInt(m ?? "0", 10)
 }
 
-type ManualSortKey = "route" | "date" | "departure" | "arrival" | "duration" | "cost" | "airline"
-type ExploreSortKey = "destination" | "date" | "cost" | "airline"
+type ManualSortKey = "route" | "date" | "departure" | "arrival" | "duration" | "stops" | "cost" | "airline"
+type ExploreSortKey = "destination" | "date" | "cost" | "stops" | "airline"
 
 function SortableTh<K extends string>({
   sortKey,
@@ -145,7 +202,7 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   const trip = fromContext ?? tripProp
 
   const [activeTab, setActiveTab] = useState<"manual" | "explore">("manual")
-  const [tripType, setTripType] = useState<TripType>("one_way")
+  const [tripType, setTripType] = useState<TripType>("round_trip")
 
   // Manual: one-way
   const [origin, setOrigin] = useState<Place | null>(null)
@@ -184,6 +241,27 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   const [expFilterAirline, setExpFilterAirline] = useState("")
   const [expFilterMaxPrice, setExpFilterMaxPrice] = useState("")
   const [flightApi, setFlightApi] = useState<"duffel" | "serpapi">("duffel")
+  const [mounted, setMounted] = useState(false)
+  const [expandedManualOfferIds, setExpandedManualOfferIds] = useState<Set<string>>(new Set())
+  const [expandedExpRowKeys, setExpandedExpRowKeys] = useState<Set<string>>(new Set())
+  useEffect(() => setMounted(true), [])
+
+  const toggleManualExpanded = (offerId: string) => {
+    setExpandedManualOfferIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(offerId)) next.delete(offerId)
+      else next.add(offerId)
+      return next
+    })
+  }
+  const toggleExpExpanded = (rowKey: string) => {
+    setExpandedExpRowKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(rowKey)) next.delete(rowKey)
+      else next.add(rowKey)
+      return next
+    })
+  }
 
   const setPlace =
     (setter: (p: Place | null) => void) =>
@@ -259,6 +337,9 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
         case "duration":
           cmp = durationToMinutes(ra.duration) - durationToMinutes(rb.duration)
           break
+        case "stops":
+          cmp = getStopsCount(a) - getStopsCount(b)
+          break
         case "cost":
           cmp = Number(a.totalAmount) - Number(b.totalAmount)
           break
@@ -313,6 +394,9 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
           break
         case "cost":
           cmp = Number(a.offer.totalAmount) - Number(b.offer.totalAmount)
+          break
+        case "stops":
+          cmp = getStopsCount(a.offer) - getStopsCount(b.offer)
           break
         case "airline":
           cmp = (a.offer.owner?.name ?? "").localeCompare(b.offer.owner?.name ?? "")
@@ -438,6 +522,18 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   const updateLeg = (index: number, upd: Partial<Leg>) => {
     setLegs((prev) =>
       prev.map((l, i) => (i === index ? { ...l, ...upd } : l))
+    )
+  }
+
+  if (!mounted) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="border-input h-9 w-48 animate-pulse rounded-none border bg-muted/50" />
+          <div className="border-input h-9 w-24 animate-pulse rounded-none border bg-muted/50" />
+        </div>
+        <div className="min-h-[320px] rounded-none border border-border bg-muted/20" />
+      </div>
     )
   }
 
@@ -843,6 +939,13 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                         onSort={handleManualSort}
                       />
                       <SortableTh
+                        sortKey="stops"
+                        currentSortBy={manualSortBy}
+                        currentSortDir={manualSortDir}
+                        label="Stops"
+                        onSort={handleManualSort}
+                      />
+                      <SortableTh
                         sortKey="cost"
                         currentSortBy={manualSortBy}
                         currentSortDir={manualSortDir}
@@ -866,51 +969,100 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                       const airlineName = offer.owner?.name ?? "Airline"
                       const bookUrl = getBookUrl(offer)
                       const selected = selectedOfferId === offer.id
+                      const hasStops = getStopsCount(offer) >= 1
+                      const isExpanded = expandedManualOfferIds.has(offer.id)
+                      const stopDetails = getStopDetails(offer)
                       return (
-                        <tr
-                          key={offer.id}
-                          className={cn(
-                            "border-border border-b last:border-b-0",
-                            selected && "bg-primary/5"
-                          )}
-                        >
-                          <td className="p-2">{row.route}</td>
-                          <td className="p-2 text-muted-foreground">{row.dateStr}</td>
-                          <td className="p-2">{row.departure}</td>
-                          <td className="p-2">{row.arrival}</td>
-                          <td className="p-2">{row.duration}</td>
-                          <td className="p-2 font-medium">
-                            {offer.totalAmount} {offer.totalCurrency}
-                          </td>
-                          <td className="p-2">{airlineName}</td>
-                          <td className="p-2">
-                            <Button
-                              variant={selected ? "secondary" : "outline"}
-                              size="sm"
-                              className="rounded-none"
-                              onClick={() =>
-                                setSelectedOfferId((id) =>
-                                  id === offer.id ? null : offer.id
-                                )
-                              }
-                            >
-                              {selected ? <CheckIcon className="size-3.5" /> : "Select"}
-                            </Button>
-                          </td>
-                          <td className="p-2">
-                            <Button asChild variant="default" size="sm" className="rounded-none">
-                              <a
-                                href={bookUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1"
+                        <Fragment key={offer.id}>
+                          <tr
+                            className={cn(
+                              "border-border border-b last:border-b-0",
+                              selected && "bg-primary/5"
+                            )}
+                          >
+                            <td className="p-2">{row.route}</td>
+                            <td className="p-2 text-muted-foreground">{row.dateStr}</td>
+                            <td className="p-2">{row.departure}</td>
+                            <td className="p-2">{row.arrival}</td>
+                            <td className="p-2">{row.duration}</td>
+                            <td className="p-2 text-muted-foreground">
+                              {hasStops ? (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleManualExpanded(offer.id)}
+                                  className="inline-flex items-center gap-1 hover:underline focus:outline-none focus:ring-1 focus:ring-ring rounded"
+                                >
+                                  {getStopsLabel(offer)}
+                                  {isExpanded ? (
+                                    <ChevronUpIcon className="size-3.5" />
+                                  ) : (
+                                    <ChevronDownIcon className="size-3.5" />
+                                  )}
+                                </button>
+                              ) : (
+                                getStopsLabel(offer)
+                              )}
+                            </td>
+                            <td className="p-2 font-medium">
+                              {offer.totalAmount} {offer.totalCurrency}
+                            </td>
+                            <td className="p-2">{airlineName}</td>
+                            <td className="p-2">
+                              <Button
+                                variant={selected ? "secondary" : "outline"}
+                                size="sm"
+                                className="rounded-none"
+                                onClick={() =>
+                                  setSelectedOfferId((id) =>
+                                    id === offer.id ? null : offer.id
+                                  )
+                                }
                               >
-                                Book
-                                <ExternalLinkIcon className="size-3.5" />
-                              </a>
-                            </Button>
-                          </td>
-                        </tr>
+                                {selected ? <CheckIcon className="size-3.5" /> : "Select"}
+                              </Button>
+                            </td>
+                            <td className="p-2">
+                              <Button asChild variant="default" size="sm" className="rounded-none">
+                                <a
+                                  href={bookUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1"
+                                >
+                                  Book
+                                  <ExternalLinkIcon className="size-3.5" />
+                                </a>
+                              </Button>
+                            </td>
+                          </tr>
+                          {hasStops && isExpanded && stopDetails.length > 0 && (
+                            <tr
+                              key={`${offer.id}-stops`}
+                              className="border-border border-b bg-muted/20 last:border-b-0"
+                            >
+                              <td colSpan={10} className="p-2 pl-4 text-muted-foreground">
+                                <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+                                  {stopDetails.map((s, i) => (
+                                    <li key={i}>
+                                      Stop {s.stopIndex}
+                                      {offer.slices.length > 1 && ` (leg ${s.sliceIndex + 1})`}:{" "}
+                                      <span className="font-medium text-foreground/80">
+                                        {s.airportCode || s.airportName}
+                                      </span>
+                                      {s.airportCode && s.airportName !== s.airportCode && (
+                                        <span> — {s.airportName}</span>
+                                      )}
+                                      {" · "}
+                                      <span className="italic">
+                                        {formatLayover(s.layoverMinutes)} layover
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       )
                     })}
                   </tbody>
@@ -1087,6 +1239,13 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                         onSort={handleExpSort}
                       />
                       <SortableTh
+                        sortKey="stops"
+                        currentSortBy={expSortBy}
+                        currentSortDir={expSortDir}
+                        label="Stops"
+                        onSort={handleExpSort}
+                      />
+                      <SortableTh
                         sortKey="cost"
                         currentSortBy={expSortBy}
                         currentSortDir={expSortDir}
@@ -1107,53 +1266,100 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                   <tbody>
                     {expFilteredAndSortedRows.map((row) => {
                       const { date, destinationName, offer } = row
+                      const rowKey = `${row.destination}-${date}-${offer.id}`
                       const airlineName = offer.owner?.name ?? "Airline"
                       const bookUrl = getBookUrl(offer)
                       const selected = expSelectedOfferId === offer.id
+                      const hasStops = getStopsCount(offer) >= 1
+                      const isExpanded = expandedExpRowKeys.has(rowKey)
+                      const stopDetails = getStopDetails(offer)
                       return (
-                        <tr
-                          key={`${row.destination}-${date}-${offer.id}`}
-                          className={cn(
-                            "border-border border-b last:border-b-0",
-                            selected && "bg-primary/5"
-                          )}
-                        >
-                          <td className="p-2">{destinationName}</td>
-                          <td className="p-2 text-muted-foreground">
-                            {formatDate(date)}
-                          </td>
-                          <td className="p-2 font-medium">
-                            {offer.totalAmount} {offer.totalCurrency}
-                          </td>
-                          <td className="p-2">{airlineName}</td>
-                          <td className="p-2">
-                            <Button
-                              variant={selected ? "secondary" : "outline"}
-                              size="sm"
-                              className="rounded-none"
-                              onClick={() =>
-                                setExpSelectedOfferId((id) =>
-                                  id === offer.id ? null : offer.id
-                                )
-                              }
-                            >
-                              {selected ? <CheckIcon className="size-3.5" /> : "Select"}
-                            </Button>
-                          </td>
-                          <td className="p-2">
-                            <Button asChild variant="default" size="sm" className="rounded-none">
-                              <a
-                                href={bookUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1"
+                        <Fragment key={rowKey}>
+                          <tr
+                            className={cn(
+                              "border-border border-b last:border-b-0",
+                              selected && "bg-primary/5"
+                            )}
+                          >
+                            <td className="p-2">{destinationName}</td>
+                            <td className="p-2 text-muted-foreground">
+                              {formatDate(date)}
+                            </td>
+                            <td className="p-2 text-muted-foreground">
+                              {hasStops ? (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleExpExpanded(rowKey)}
+                                  className="inline-flex items-center gap-1 hover:underline focus:outline-none focus:ring-1 focus:ring-ring rounded"
+                                >
+                                  {getStopsLabel(offer)}
+                                  {isExpanded ? (
+                                    <ChevronUpIcon className="size-3.5" />
+                                  ) : (
+                                    <ChevronDownIcon className="size-3.5" />
+                                  )}
+                                </button>
+                              ) : (
+                                getStopsLabel(offer)
+                              )}
+                            </td>
+                            <td className="p-2 font-medium">
+                              {offer.totalAmount} {offer.totalCurrency}
+                            </td>
+                            <td className="p-2">{airlineName}</td>
+                            <td className="p-2">
+                              <Button
+                                variant={selected ? "secondary" : "outline"}
+                                size="sm"
+                                className="rounded-none"
+                                onClick={() =>
+                                  setExpSelectedOfferId((id) =>
+                                    id === offer.id ? null : offer.id
+                                  )
+                                }
                               >
-                                Book
-                                <ExternalLinkIcon className="size-3.5" />
-                              </a>
-                            </Button>
-                          </td>
-                        </tr>
+                                {selected ? <CheckIcon className="size-3.5" /> : "Select"}
+                              </Button>
+                            </td>
+                            <td className="p-2">
+                              <Button asChild variant="default" size="sm" className="rounded-none">
+                                <a
+                                  href={bookUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1"
+                                >
+                                  Book
+                                  <ExternalLinkIcon className="size-3.5" />
+                                </a>
+                              </Button>
+                            </td>
+                          </tr>
+                          {hasStops && isExpanded && stopDetails.length > 0 && (
+                            <tr className="border-border border-b bg-muted/20 last:border-b-0">
+                              <td colSpan={7} className="p-2 pl-4 text-muted-foreground">
+                                <ul className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+                                  {stopDetails.map((s, i) => (
+                                    <li key={i}>
+                                      Stop {s.stopIndex}
+                                      {offer.slices.length > 1 && ` (leg ${s.sliceIndex + 1})`}:{" "}
+                                      <span className="font-medium text-foreground/80">
+                                        {s.airportCode || s.airportName}
+                                      </span>
+                                      {s.airportCode && s.airportName !== s.airportCode && (
+                                        <span> — {s.airportName}</span>
+                                      )}
+                                      {" · "}
+                                      <span className="italic">
+                                        {formatLayover(s.layoverMinutes)} layover
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       )
                     })}
                   </tbody>

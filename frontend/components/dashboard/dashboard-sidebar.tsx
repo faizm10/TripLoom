@@ -47,10 +47,10 @@ export function DashboardSidebar({
       <SidebarHeader>
         <div className="flex items-center gap-2 border px-2 py-2">
           <span className="bg-primary text-primary-foreground inline-flex size-6 items-center justify-center text-xs font-bold">
-            T
+            TL
           </span>
           <div className="min-w-0">
-            <p className="truncate text-xs font-medium">Travel OS</p>
+            <p className="truncate text-xs font-medium">TripLoom</p>
             <p className="text-muted-foreground truncate text-[11px]">Dashboard</p>
           </div>
         </div>

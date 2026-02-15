@@ -55,15 +55,15 @@ function normalizeOffer(offer: RawOffer): FlightOffer {
     return {
       origin: first?.origin
         ? {
-            name: first.origin.name,
-            iataCode: first.origin.iata_code,
+            name: first.origin.name ?? "",
+            iataCode: first.origin.iata_code ?? "",
             cityName: (first.origin as { city_name?: string }).city_name,
           }
         : { name: "", iataCode: "", cityName: undefined },
       destination: last?.destination
         ? {
-            name: last.destination.name,
-            iataCode: last.destination.iata_code,
+            name: last.destination.name ?? "",
+            iataCode: last.destination.iata_code ?? "",
             cityName: (last.destination as { city_name?: string }).city_name,
           }
         : { name: "", iataCode: "", cityName: undefined },

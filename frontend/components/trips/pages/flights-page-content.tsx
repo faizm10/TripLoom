@@ -160,7 +160,6 @@ function durationToMinutes(d: string): number {
 }
 
 type ManualSortKey = "route" | "date" | "departure" | "arrival" | "duration" | "stops" | "cost" | "airline"
-type ExploreSortKey = "destination" | "date" | "cost" | "stops" | "airline"
 
 type InboundStopDetail = {
   airport: string
@@ -268,25 +267,9 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   const [manualFilterAirline, setManualFilterAirline] = useState("")
   const [manualFilterMaxPrice, setManualFilterMaxPrice] = useState("")
 
-  // Explore
-  const [expOrigin, setExpOrigin] = useState<Place | null>(null)
-  const [expDestination, setExpDestination] = useState<Place | null>(null)
-  const [expNumDays, setExpNumDays] = useState(7)
-  const [expLoading, setExpLoading] = useState(false)
-  const [expError, setExpError] = useState<string | null>(null)
-  const [expResults, setExpResults] = useState<{
-    rows: { date: string; destination: string; destinationName: string; offer: FlightOffer }[]
-    overallCheapest: FlightOffer | null
-  } | null>(null)
-  const [expSelectedOfferId, setExpSelectedOfferId] = useState<string | null>(null)
-  const [expSortBy, setExpSortBy] = useState<ExploreSortKey | null>("cost")
-  const [expSortDir, setExpSortDir] = useState<"asc" | "desc">("asc")
-  const [expFilterAirline, setExpFilterAirline] = useState("")
-  const [expFilterMaxPrice, setExpFilterMaxPrice] = useState("")
   const [flightApi, setFlightApi] = useState<"duffel" | "serpapi">("duffel")
   const [mounted, setMounted] = useState(false)
   const [expandedManualOfferIds, setExpandedManualOfferIds] = useState<Set<string>>(new Set())
-  const [expandedExpRowKeys, setExpandedExpRowKeys] = useState<Set<string>>(new Set())
   // SerpAPI round trip two-step: outbound selected → load return flights
   const [selectedOutboundOfferId, setSelectedOutboundOfferId] = useState<string | null>(null)
   const [returnOffers, setReturnOffers] = useState<FlightOffer[]>([])
@@ -312,14 +295,6 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
       const next = new Set(prev)
       if (next.has(offerId)) next.delete(offerId)
       else next.add(offerId)
-      return next
-    })
-  }
-  const toggleExpExpanded = (rowKey: string) => {
-    setExpandedExpRowKeys((prev) => {
-      const next = new Set(prev)
-      if (next.has(rowKey)) next.delete(rowKey)
-      else next.add(rowKey)
       return next
     })
   }
@@ -492,60 +467,6 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
     return list
   }, [offers, manualFilterAirline, manualFilterMaxPrice, manualSortBy, manualSortDir])
 
-  const expAirlines = useMemo(() => {
-    if (!expResults?.rows?.length) return []
-    const set = new Set<string>()
-    expResults.rows.forEach((r) => {
-      const n = r.offer.owner?.name
-      if (n) set.add(n)
-    })
-    return Array.from(set).sort()
-  }, [expResults?.rows])
-
-  const expFilteredAndSortedRows = useMemo(() => {
-    if (!expResults?.rows?.length) return []
-    const seen = new Set<string>()
-    let list = expResults.rows.filter((r) => {
-      const key = `${r.destination}-${r.date}-${r.offer.id}`
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
-    if (expFilterAirline) {
-      list = list.filter((r) => r.offer.owner?.name === expFilterAirline)
-    }
-    const maxP = expFilterMaxPrice.trim()
-    if (maxP !== "") {
-      const num = Number(maxP)
-      if (!Number.isNaN(num)) list = list.filter((r) => Number(r.offer.totalAmount) <= num)
-    }
-    if (expSortBy == null) return list
-    const dir = expSortDir === "asc" ? 1 : -1
-    list.sort((a, b) => {
-      let cmp = 0
-      switch (expSortBy) {
-        case "destination":
-          cmp = (a.destinationName ?? "").localeCompare(b.destinationName ?? "")
-          break
-        case "date":
-          cmp = (a.date ?? "").localeCompare(b.date ?? "")
-          break
-        case "cost":
-          cmp = Number(a.offer.totalAmount) - Number(b.offer.totalAmount)
-          break
-        case "stops":
-          cmp = getStopsCount(a.offer) - getStopsCount(b.offer)
-          break
-        case "airline":
-          cmp = (a.offer.owner?.name ?? "").localeCompare(b.offer.owner?.name ?? "")
-          break
-        default:
-          break
-      }
-      return cmp * dir
-    })
-    return list
-  }, [expResults?.rows, expFilterAirline, expFilterMaxPrice, expSortBy, expSortDir])
 
   const handleManualSort = (key: ManualSortKey) => {
     setManualSortBy((prev) => {
@@ -558,16 +479,6 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
     })
   }
 
-  const handleExpSort = (key: ExploreSortKey) => {
-    setExpSortBy((prev) => {
-      if (prev === key) {
-        setExpSortDir((d) => (d === "asc" ? "desc" : "asc"))
-        return key
-      }
-      setExpSortDir("asc")
-      return key
-    })
-  }
 
   const handleManualSearch = async () => {
     const slices = buildSlices()
@@ -617,43 +528,6 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
     }
   }
 
-  const handleExploreSearch = async () => {
-    if (!expOrigin?.iataCode) {
-      setExpError("Choose origin.")
-      return
-    }
-    setExpError(null)
-    setExpLoading(true)
-    setExpResults(null)
-    setExpSelectedOfferId(null)
-    try {
-      const endpoint =
-        flightApi === "serpapi" ? "/api/flights/serp/explore" : "/api/flights/explore"
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          origin: expOrigin.iataCode,
-          ...(expDestination?.iataCode && { destination: expDestination.iataCode }),
-          num_days: expNumDays,
-          adults: 1,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        setExpError(data?.error ?? "Explore failed")
-        return
-      }
-      setExpResults({
-        rows: data.rows ?? [],
-        overallCheapest: data.overallCheapest ?? null,
-      })
-    } catch (e) {
-      setExpError(e instanceof Error ? e.message : "Explore failed")
-    } finally {
-      setExpLoading(false)
-    }
-  }
 
   const addLeg = () => {
     if (legs.length >= 6) return

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -21,6 +21,10 @@ import {
   type DestinationSuggestion,
 } from "@/components/dashboard-home/destination-search"
 import { getAirlineBookingUrl } from "@/lib/airline-booking-urls"
+
+function getBookUrl(offer: FlightOffer): string {
+  return offer.bookUrl ?? getAirlineBookingUrl(offer.owner?.iataCode ?? "")
+}
 import type { Trip } from "@/lib/trips"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -102,6 +106,40 @@ function durationToMinutes(d: string): number {
 type ManualSortKey = "route" | "date" | "departure" | "arrival" | "duration" | "cost" | "airline"
 type ExploreSortKey = "destination" | "date" | "cost" | "airline"
 
+function SortableTh<K extends string>({
+  sortKey,
+  currentSortBy,
+  currentSortDir,
+  label,
+  onSort,
+}: {
+  sortKey: K
+  currentSortBy: K | null
+  currentSortDir: "asc" | "desc"
+  label: string
+  onSort: (key: K) => void
+}) {
+  const active = currentSortBy === sortKey
+  return (
+    <th className="text-left p-2 font-medium">
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className="inline-flex items-center gap-1 hover:underline focus:outline-none focus:ring-1 focus:ring-ring rounded"
+      >
+        {label}
+        {active ? (
+          currentSortDir === "asc" ? (
+            <ArrowUpIcon className="size-3.5" />
+          ) : (
+            <ArrowDownIcon className="size-3.5" />
+          )
+        ) : null}
+      </button>
+    </th>
+  )
+}
+
 export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   const fromContext = useTripPage()
   const trip = fromContext ?? tripProp
@@ -145,6 +183,7 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   const [expSortDir, setExpSortDir] = useState<"asc" | "desc">("asc")
   const [expFilterAirline, setExpFilterAirline] = useState("")
   const [expFilterMaxPrice, setExpFilterMaxPrice] = useState("")
+  const [flightApi, setFlightApi] = useState<"duffel" | "serpapi">("duffel")
 
   const setPlace =
     (setter: (p: Place | null) => void) =>
@@ -174,6 +213,140 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
       }))
   }
 
+  const manualAirlines = useMemo(() => {
+    const set = new Set<string>()
+    offers.forEach((o) => {
+      const n = o.owner?.name
+      if (n) set.add(n)
+    })
+    return Array.from(set).sort()
+  }, [offers])
+
+  const manualFilteredAndSortedOffers = useMemo(() => {
+    const seen = new Set<string>()
+    let list = offers.filter((o) => {
+      if (seen.has(o.id)) return false
+      seen.add(o.id)
+      return true
+    })
+    if (manualFilterAirline) {
+      list = list.filter((o) => o.owner?.name === manualFilterAirline)
+    }
+    const maxP = manualFilterMaxPrice.trim()
+    if (maxP !== "") {
+      const num = Number(maxP)
+      if (!Number.isNaN(num)) list = list.filter((o) => Number(o.totalAmount) <= num)
+    }
+    if (manualSortBy == null) return list
+    const dir = manualSortDir === "asc" ? 1 : -1
+    list.sort((a, b) => {
+      const ra = getOfferRow(a)
+      const rb = getOfferRow(b)
+      let cmp = 0
+      switch (manualSortBy) {
+        case "route":
+          cmp = (ra.route ?? "").localeCompare(rb.route ?? "")
+          break
+        case "date":
+          cmp = (ra.dateStr ?? "").localeCompare(rb.dateStr ?? "")
+          break
+        case "departure":
+          cmp = (ra.departure ?? "").localeCompare(rb.departure ?? "")
+          break
+        case "arrival":
+          cmp = (ra.arrival ?? "").localeCompare(rb.arrival ?? "")
+          break
+        case "duration":
+          cmp = durationToMinutes(ra.duration) - durationToMinutes(rb.duration)
+          break
+        case "cost":
+          cmp = Number(a.totalAmount) - Number(b.totalAmount)
+          break
+        case "airline":
+          cmp = (a.owner?.name ?? "").localeCompare(b.owner?.name ?? "")
+          break
+        default:
+          break
+      }
+      return cmp * dir
+    })
+    return list
+  }, [offers, manualFilterAirline, manualFilterMaxPrice, manualSortBy, manualSortDir])
+
+  const expAirlines = useMemo(() => {
+    if (!expResults?.rows?.length) return []
+    const set = new Set<string>()
+    expResults.rows.forEach((r) => {
+      const n = r.offer.owner?.name
+      if (n) set.add(n)
+    })
+    return Array.from(set).sort()
+  }, [expResults?.rows])
+
+  const expFilteredAndSortedRows = useMemo(() => {
+    if (!expResults?.rows?.length) return []
+    const seen = new Set<string>()
+    let list = expResults.rows.filter((r) => {
+      const key = `${r.destination}-${r.date}-${r.offer.id}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    if (expFilterAirline) {
+      list = list.filter((r) => r.offer.owner?.name === expFilterAirline)
+    }
+    const maxP = expFilterMaxPrice.trim()
+    if (maxP !== "") {
+      const num = Number(maxP)
+      if (!Number.isNaN(num)) list = list.filter((r) => Number(r.offer.totalAmount) <= num)
+    }
+    if (expSortBy == null) return list
+    const dir = expSortDir === "asc" ? 1 : -1
+    list.sort((a, b) => {
+      let cmp = 0
+      switch (expSortBy) {
+        case "destination":
+          cmp = (a.destinationName ?? "").localeCompare(b.destinationName ?? "")
+          break
+        case "date":
+          cmp = (a.date ?? "").localeCompare(b.date ?? "")
+          break
+        case "cost":
+          cmp = Number(a.offer.totalAmount) - Number(b.offer.totalAmount)
+          break
+        case "airline":
+          cmp = (a.offer.owner?.name ?? "").localeCompare(b.offer.owner?.name ?? "")
+          break
+        default:
+          break
+      }
+      return cmp * dir
+    })
+    return list
+  }, [expResults?.rows, expFilterAirline, expFilterMaxPrice, expSortBy, expSortDir])
+
+  const handleManualSort = (key: ManualSortKey) => {
+    setManualSortBy((prev) => {
+      if (prev === key) {
+        setManualSortDir((d) => (d === "asc" ? "desc" : "asc"))
+        return key
+      }
+      setManualSortDir("asc")
+      return key
+    })
+  }
+
+  const handleExpSort = (key: ExploreSortKey) => {
+    setExpSortBy((prev) => {
+      if (prev === key) {
+        setExpSortDir((d) => (d === "asc" ? "desc" : "asc"))
+        return key
+      }
+      setExpSortDir("asc")
+      return key
+    })
+  }
+
   const handleManualSearch = async () => {
     const slices = buildSlices()
     if (slices.length === 0) {
@@ -186,14 +359,20 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
     setSearched(false)
     setSelectedOfferId(null)
     try {
-      const res = await fetch("/api/flights/search", {
+      const endpoint =
+        flightApi === "serpapi" ? "/api/flights/serp/search" : "/api/flights/search"
+      const payload: Record<string, unknown> = {
+        slices,
+        adults,
+        cabin_class: "economy",
+      }
+      if (flightApi === "serpapi" && tripType === "round_trip" && slices[1]) {
+        payload.return_date = slices[1].departure_date
+      }
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          slices,
-          adults,
-          cabin_class: "economy",
-        }),
+        body: JSON.stringify(payload),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -220,7 +399,9 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
     setExpResults(null)
     setExpSelectedOfferId(null)
     try {
-      const res = await fetch("/api/flights/explore", {
+      const endpoint =
+        flightApi === "serpapi" ? "/api/flights/serp/explore" : "/api/flights/explore"
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -263,16 +444,47 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   return (
     <div className="space-y-6">
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "manual" | "explore")}>
-        <TabsList variant="default" className="w-full max-w-md">
-          <TabsTrigger value="manual" className="flex-1">
-            <SearchIcon className="size-3.5" />
-            Manual search
-          </TabsTrigger>
-          <TabsTrigger value="explore" className="flex-1">
-            <CalendarIcon className="size-3.5" />
-            Explore (cheapest dates)
-          </TabsTrigger>
-        </TabsList>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TabsList variant="default" className="w-full max-w-md">
+            <TabsTrigger value="manual" className="flex-1">
+              <SearchIcon className="size-3.5" />
+              Manual search
+            </TabsTrigger>
+            <TabsTrigger value="explore" className="flex-1">
+              <CalendarIcon className="size-3.5" />
+              Explore (cheapest dates)
+            </TabsTrigger>
+          </TabsList>
+          <div className="flex items-center gap-2">
+            <span className="text-muted-foreground text-xs font-medium">API:</span>
+            <div className="border-input flex rounded-none border bg-muted/30 p-0.5">
+              <button
+                type="button"
+                onClick={() => setFlightApi("duffel")}
+                className={cn(
+                  "rounded-none px-2.5 py-1 text-xs font-medium transition-colors",
+                  flightApi === "duffel"
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted"
+                )}
+              >
+                Duffel
+              </button>
+              <button
+                type="button"
+                onClick={() => setFlightApi("serpapi")}
+                className={cn(
+                  "rounded-none px-2.5 py-1 text-xs font-medium transition-colors",
+                  flightApi === "serpapi"
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted"
+                )}
+              >
+                SerpAPI
+              </button>
+            </div>
+          </div>
+        </div>
 
         <TabsContent value="manual" className="mt-4 space-y-6">
           <Card>
@@ -558,26 +770,101 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                 {tripType === "round_trip" &&
                   `: ${origin?.displayName ?? origin?.iataCode} ↔ ${destination?.displayName ?? destination?.iataCode}`}
               </h2>
+              <div className="border-border flex flex-wrap items-center gap-3 rounded-none border bg-muted/30 p-3">
+                <span className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
+                  <FilterIcon className="size-3.5" />
+                  Filters
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Label className="text-xs">Airline</Label>
+                  <select
+                    value={manualFilterAirline}
+                    onChange={(e) => setManualFilterAirline(e.target.value)}
+                    className="border-input bg-background h-8 min-w-[120px] rounded-none border px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    <option value="">All</option>
+                    {manualAirlines.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Label className="text-xs">Max price</Label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    placeholder="No limit"
+                    value={manualFilterMaxPrice}
+                    onChange={(e) => setManualFilterMaxPrice(e.target.value)}
+                    className="border-input bg-background h-8 w-24 rounded-none border px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              </div>
               <div className="border-border overflow-x-auto rounded-none border">
                 <table className="w-full min-w-[640px] text-xs">
                   <thead>
                     <tr className="border-border bg-muted/50 border-b">
-                      <th className="text-left p-2 font-medium">Route</th>
-                      <th className="text-left p-2 font-medium">Date</th>
-                      <th className="text-left p-2 font-medium">Departure</th>
-                      <th className="text-left p-2 font-medium">Arrival</th>
-                      <th className="text-left p-2 font-medium">Duration</th>
-                      <th className="text-left p-2 font-medium">Cost</th>
-                      <th className="text-left p-2 font-medium">Airline</th>
+                      <SortableTh
+                        sortKey="route"
+                        currentSortBy={manualSortBy}
+                        currentSortDir={manualSortDir}
+                        label="Route"
+                        onSort={handleManualSort}
+                      />
+                      <SortableTh
+                        sortKey="date"
+                        currentSortBy={manualSortBy}
+                        currentSortDir={manualSortDir}
+                        label="Date"
+                        onSort={handleManualSort}
+                      />
+                      <SortableTh
+                        sortKey="departure"
+                        currentSortBy={manualSortBy}
+                        currentSortDir={manualSortDir}
+                        label="Departure"
+                        onSort={handleManualSort}
+                      />
+                      <SortableTh
+                        sortKey="arrival"
+                        currentSortBy={manualSortBy}
+                        currentSortDir={manualSortDir}
+                        label="Arrival"
+                        onSort={handleManualSort}
+                      />
+                      <SortableTh
+                        sortKey="duration"
+                        currentSortBy={manualSortBy}
+                        currentSortDir={manualSortDir}
+                        label="Duration"
+                        onSort={handleManualSort}
+                      />
+                      <SortableTh
+                        sortKey="cost"
+                        currentSortBy={manualSortBy}
+                        currentSortDir={manualSortDir}
+                        label="Cost"
+                        onSort={handleManualSort}
+                      />
+                      <SortableTh
+                        sortKey="airline"
+                        currentSortBy={manualSortBy}
+                        currentSortDir={manualSortDir}
+                        label="Airline"
+                        onSort={handleManualSort}
+                      />
                       <th className="w-0 p-2" />
                       <th className="w-0 p-2" />
                     </tr>
                   </thead>
                   <tbody>
-                    {offers.map((offer) => {
+                    {manualFilteredAndSortedOffers.map((offer) => {
                       const row = getOfferRow(offer)
                       const airlineName = offer.owner?.name ?? "Airline"
-                      const bookUrl = getAirlineBookingUrl(offer.owner?.iataCode ?? "")
+                      const bookUrl = getBookUrl(offer)
                       const selected = selectedOfferId === offer.id
                       return (
                         <tr
@@ -639,9 +926,8 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                   </span>
                   <Button asChild size="sm" className="rounded-none">
                     <a
-                      href={getAirlineBookingUrl(
-                        offers.find((o) => o.id === selectedOfferId)?.owner
-                          ?.iataCode ?? ""
+                      href={getBookUrl(
+                        offers.find((o) => o.id === selectedOfferId) ?? ({} as FlightOffer)
                       )}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -749,23 +1035,80 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                   ? ` to ${expDestination.displayName}`
                   : " (from your origin)"}
               </h2>
+              <div className="border-border flex flex-wrap items-center gap-3 rounded-none border bg-muted/30 p-3">
+                <span className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
+                  <FilterIcon className="size-3.5" />
+                  Filters
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Label className="text-xs">Airline</Label>
+                  <select
+                    value={expFilterAirline}
+                    onChange={(e) => setExpFilterAirline(e.target.value)}
+                    className="border-input bg-background h-8 min-w-[120px] rounded-none border px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    <option value="">All</option>
+                    {expAirlines.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Label className="text-xs">Max price</Label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    placeholder="No limit"
+                    value={expFilterMaxPrice}
+                    onChange={(e) => setExpFilterMaxPrice(e.target.value)}
+                    className="border-input bg-background h-8 w-24 rounded-none border px-2 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              </div>
               <div className="border-border overflow-x-auto rounded-none border">
                 <table className="w-full min-w-[520px] text-xs">
                   <thead>
                     <tr className="border-border bg-muted/50 border-b">
-                      <th className="text-left p-2 font-medium">Destination</th>
-                      <th className="text-left p-2 font-medium">Date</th>
-                      <th className="text-left p-2 font-medium">Cost</th>
-                      <th className="text-left p-2 font-medium">Airline</th>
+                      <SortableTh
+                        sortKey="destination"
+                        currentSortBy={expSortBy}
+                        currentSortDir={expSortDir}
+                        label="Destination"
+                        onSort={handleExpSort}
+                      />
+                      <SortableTh
+                        sortKey="date"
+                        currentSortBy={expSortBy}
+                        currentSortDir={expSortDir}
+                        label="Date"
+                        onSort={handleExpSort}
+                      />
+                      <SortableTh
+                        sortKey="cost"
+                        currentSortBy={expSortBy}
+                        currentSortDir={expSortDir}
+                        label="Cost"
+                        onSort={handleExpSort}
+                      />
+                      <SortableTh
+                        sortKey="airline"
+                        currentSortBy={expSortBy}
+                        currentSortDir={expSortDir}
+                        label="Airline"
+                        onSort={handleExpSort}
+                      />
                       <th className="w-0 p-2" />
                       <th className="w-0 p-2" />
                     </tr>
                   </thead>
                   <tbody>
-                    {expResults.rows.map((row) => {
+                    {expFilteredAndSortedRows.map((row) => {
                       const { date, destinationName, offer } = row
                       const airlineName = offer.owner?.name ?? "Airline"
-                      const bookUrl = getAirlineBookingUrl(offer.owner?.iataCode ?? "")
+                      const bookUrl = getBookUrl(offer)
                       const selected = expSelectedOfferId === offer.id
                       return (
                         <tr

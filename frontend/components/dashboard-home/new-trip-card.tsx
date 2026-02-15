@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { DestinationSearch } from "@/components/dashboard-home/destination-search"
 
 export function NewTripCard() {
   return (
@@ -17,7 +17,7 @@ export function NewTripCard() {
       <div className="mt-5 grid gap-3 lg:grid-cols-4">
         <div className="lg:col-span-2">
           <label className="mb-1 block text-xs font-medium">Destination</label>
-          <Input placeholder="Where do you want to go?" />
+          <DestinationSearch placeholder="Where do you want to go?" />
         </div>
 
         <div>

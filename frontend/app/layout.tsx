@@ -1,19 +1,22 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono, Outfit } from "next/font/google";
-import { TripsProvider } from "@/components/providers/trips-provider";
-import "./globals.css";
+import type { Metadata } from "next"
+import { Geist, Geist_Mono, Outfit } from "next/font/google"
 
-const outfit = Outfit({subsets:['latin'],variable:'--font-sans'});
+import { TripsProvider } from "@/components/providers/trips-provider"
+import { Toaster } from "@/components/ui/sonner"
+
+import "./globals.css"
+
+const outfit = Outfit({ subsets: ["latin"], variable: "--font-sans" })
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
-});
+})
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
-});
+})
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://triploom.com"),
@@ -78,20 +81,21 @@ export const metadata: Metadata = {
     },
   },
   category: "travel",
-};
+}
 
 export default function RootLayout({
   children,
 }: Readonly<{
-  children: React.ReactNode;
+  children: React.ReactNode
 }>) {
   return (
     <html lang="en" className={outfit.variable}>
-      <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
-      >
-        <TripsProvider>{children}</TripsProvider>
+      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+        <TripsProvider>
+          {children}
+          <Toaster richColors position="top-right" />
+        </TripsProvider>
       </body>
     </html>
-  );
+  )
 }

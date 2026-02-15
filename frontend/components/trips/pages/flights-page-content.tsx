@@ -8,7 +8,6 @@ import {
   CheckIcon,
   ChevronDownIcon,
   ChevronUpIcon,
-  ExternalLinkIcon,
   FilterIcon,
   Loader2Icon,
   PlaneIcon,
@@ -22,54 +21,6 @@ import {
   DestinationSearch,
   type DestinationSuggestion,
 } from "@/components/dashboard-home/destination-search"
-import { getAirlineBookingUrl } from "@/lib/airline-booking-urls"
-
-function getBookUrl(offer: FlightOffer): string {
-  return offer.bookUrl ?? getAirlineBookingUrl(offer.owner?.iataCode ?? "")
-}
-
-/** Submit SerpAPI booking redirect (form POST to Google) so user lands on pre-selected flight. */
-async function submitBookingRedirect(offer: FlightOffer): Promise<void> {
-  const token = offer.bookingToken ?? offer.departureToken
-  if (token) {
-    const res = await fetch("/api/flights/serp/booking-options", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        offer.bookingToken
-          ? { booking_token: offer.bookingToken }
-          : { departure_token: offer.departureToken }
-      ),
-    })
-    const data = await res.json().catch(() => null)
-    if (!res.ok || !data?.ok || !data?.url) {
-      const fallback = getBookUrl(offer)
-      window.open(fallback, "_blank")
-      return
-    }
-    const form = document.createElement("form")
-    form.method = "POST"
-    form.action = data.url
-    form.target = "_blank"
-    if (data.post_data && typeof data.post_data === "string") {
-      data.post_data.split("&").forEach((pair: string) => {
-        const eq = pair.indexOf("=")
-        const name = eq === -1 ? pair : pair.slice(0, eq)
-        const value = eq === -1 ? "" : pair.slice(eq + 1)
-        const input = document.createElement("input")
-        input.type = "hidden"
-        input.name = name
-        input.value = value
-        form.appendChild(input)
-      })
-    }
-    document.body.appendChild(form)
-    form.submit()
-    document.body.removeChild(form)
-    return
-  }
-  window.open(getBookUrl(offer), "_blank")
-}
 
 import type { Trip } from "@/lib/trips"
 import { Button } from "@/components/ui/button"
@@ -98,7 +49,11 @@ function formatTime(iso: string): string {
 
 function formatDate(iso: string): string {
   try {
-    const d = new Date(iso)
+    // Keep YYYY-MM-DD as a local calendar date to avoid UTC shift (e.g. Apr 24 -> Apr 23)
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    const d = m
+      ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+      : new Date(iso)
     return d.toLocaleDateString("en-US", {
       weekday: "short",
       month: "short",
@@ -207,6 +162,51 @@ function durationToMinutes(d: string): number {
 type ManualSortKey = "route" | "date" | "departure" | "arrival" | "duration" | "stops" | "cost" | "airline"
 type ExploreSortKey = "destination" | "date" | "cost" | "stops" | "airline"
 
+type InboundStopDetail = {
+  airport: string
+  layover: string
+}
+
+type InboundLookupResult = {
+  flightNumber: string
+  airline: string
+  airlineLogoUrl?: string
+  routeFrom: string
+  routeTo: string
+  departureAirportName?: string
+  arrivalAirportName?: string
+  departureLocal: string
+  arrivalLocal: string
+  departureTimezone?: string
+  arrivalTimezone?: string
+  duration: string
+  terminalGate?: string
+  stops: number
+}
+
+type InboundLookupDraft = InboundLookupResult & {
+  cost: string
+  stopDetails: InboundStopDetail[]
+}
+
+type InboundFlightEntry = InboundLookupDraft & {
+  id: string
+  date: string
+}
+
+type SavedFlightChoice = {
+  id: string
+  source: string
+  route: string
+  date: string
+  departure: string
+  arrival: string
+  duration: string
+  stops: string
+  airline: string
+  cost: string
+}
+
 function SortableTh<K extends string>({
   sortKey,
   currentSortBy,
@@ -298,6 +298,15 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   // Tab flow for SerpAPI round trip: Outbound → Return → Summary
   const [flightStepTab, setFlightStepTab] = useState<"outbound" | "return" | "summary">("outbound")
   useEffect(() => setMounted(true), [])
+  const [lookupFlightNumber, setLookupFlightNumber] = useState("")
+  const [lookupDate, setLookupDate] = useState("")
+  const [lookupLoading, setLookupLoading] = useState(false)
+  const [lookupError, setLookupError] = useState<string | null>(null)
+  const [lookupDraft, setLookupDraft] = useState<InboundLookupDraft | null>(null)
+  const [lookupEditMode, setLookupEditMode] = useState(false)
+  const [inboundEntries, setInboundEntries] = useState<InboundFlightEntry[]>([])
+  const [savedFlights, setSavedFlights] = useState<SavedFlightChoice[]>([])
+  const [saveConfirmation, setSaveConfirmation] = useState<string | null>(null)
 
   const toggleManualExpanded = (offerId: string) => {
     setExpandedManualOfferIds((prev) => {
@@ -577,15 +586,15 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
     setReturnError(null)
     setSelectedReturnOfferId(null)
     try {
-      const endpoint =
-        flightApi === "serpapi" ? "/api/flights/serp/search" : "/api/flights/search"
+      const useSerpApi = flightApi === "serpapi" && tripType !== "multi_city"
+      const endpoint = useSerpApi ? "/api/flights/serp/search" : "/api/flights/search"
       const payload: Record<string, unknown> = {
         slices,
         adults,
         cabin_class: "economy",
       }
       // SerpAPI round trip: send return_date so SerpAPI returns departure_token on each offer
-      if (flightApi === "serpapi" && tripType === "round_trip" && slices[1]) {
+      if (useSerpApi && tripType === "round_trip" && slices[1]) {
         payload.slices = [slices[0]]
         payload.return_date = slices[1].departure_date
       }
@@ -661,6 +670,164 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
     )
   }
 
+  const runInboundLookup = async () => {
+    const flightNumber = lookupFlightNumber.trim().toUpperCase()
+    const departureDate = lookupDate.trim()
+    if (!flightNumber || !departureDate) {
+      setLookupError("Enter flight number and departure date.")
+      return
+    }
+    setLookupError(null)
+    setLookupLoading(true)
+    setLookupDraft(null)
+    setLookupEditMode(false)
+    try {
+      const res = await fetch("/api/flights/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          flight_number: flightNumber,
+          departure_date: departureDate,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok || !data?.ok || !data?.flight) {
+        setLookupError(data?.error ?? "Unable to find flight.")
+        return
+      }
+      setLookupDraft({
+        ...data.flight,
+        cost: "",
+        stopDetails: [],
+      } as InboundLookupDraft)
+    } catch (e) {
+      setLookupError(e instanceof Error ? e.message : "Unable to find flight.")
+    } finally {
+      setLookupLoading(false)
+    }
+  }
+
+  const updateLookupDraft = <K extends keyof InboundLookupDraft>(
+    key: K,
+    value: InboundLookupDraft[K]
+  ) => {
+    setLookupDraft((prev) => (prev ? { ...prev, [key]: value } : prev))
+  }
+
+  const addLookupStopDetail = () => {
+    setLookupDraft((prev) =>
+      prev ? { ...prev, stopDetails: [...prev.stopDetails, { airport: "", layover: "" }] } : prev
+    )
+  }
+
+  const removeLookupStopDetail = (index: number) => {
+    setLookupDraft((prev) =>
+      prev
+        ? { ...prev, stopDetails: prev.stopDetails.filter((_, i) => i !== index) }
+        : prev
+    )
+  }
+
+  const updateLookupStopDetail = (
+    index: number,
+    key: keyof InboundStopDetail,
+    value: string
+  ) => {
+    setLookupDraft((prev) =>
+      prev
+        ? {
+            ...prev,
+            stopDetails: prev.stopDetails.map((row, i) =>
+              i === index ? { ...row, [key]: value } : row
+            ),
+          }
+        : prev
+    )
+  }
+
+  const confirmLookupFlight = () => {
+    if (!lookupDraft || !lookupDate) return
+    const entry: InboundFlightEntry = {
+      ...lookupDraft,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      date: lookupDate,
+      stopDetails: lookupDraft.stopDetails
+        .filter((s) => s.airport.trim() || s.layover.trim())
+        .map((s) => ({ airport: s.airport.trim(), layover: s.layover.trim() })),
+    }
+    setInboundEntries((prev) => [entry, ...prev])
+    setLookupDraft(null)
+    setLookupEditMode(false)
+    setLookupFlightNumber("")
+    setLookupDate("")
+    setLookupError(null)
+  }
+
+  const saveFlightChoice = (offer: FlightOffer, source: string) => {
+    const row = getOfferRow(offer)
+    const id = `${source}:${offer.id}:${row.dateStr}`
+    setSavedFlights((prev) => {
+      if (prev.some((x) => x.id === id)) return prev
+      return [
+        {
+          id,
+          source,
+          route: row.route,
+          date: row.dateStr,
+          departure: row.departure,
+          arrival: row.arrival,
+          duration: row.duration,
+          stops: getStopsLabel(offer),
+          airline: offer.owner?.name ?? "Airline",
+          cost: `${offer.totalAmount} ${offer.totalCurrency}`,
+        },
+        ...prev,
+      ]
+    })
+    setSaveConfirmation(`Saved ${source} flight.`)
+  }
+
+  const saveRoundTripSelection = () => {
+    if (!selectedOutboundOffer || !selectedReturnOffer) return
+    const out = getOfferRow(selectedOutboundOffer)
+    const ret = getOfferRow(selectedReturnOffer)
+    const outId = `outbound:${selectedOutboundOffer.id}:${out.dateStr}`
+    const retId = `inbound:${selectedReturnOffer.id}:${ret.dateStr}`
+    setSavedFlights((prev) => {
+      const next = [...prev]
+      if (!next.some((x) => x.id === outId)) {
+        next.unshift({
+          id: outId,
+          source: "outbound",
+          route: out.route,
+          date: out.dateStr,
+          departure: out.departure,
+          arrival: out.arrival,
+          duration: out.duration,
+          stops: getStopsLabel(selectedOutboundOffer),
+          airline: selectedOutboundOffer.owner?.name ?? "Airline",
+          cost: `${selectedOutboundOffer.totalAmount} ${selectedOutboundOffer.totalCurrency}`,
+        })
+      }
+      if (!next.some((x) => x.id === retId)) {
+        next.unshift({
+          id: retId,
+          source: "inbound",
+          route: ret.route,
+          date: ret.dateStr,
+          departure: ret.departure,
+          arrival: ret.arrival,
+          duration: ret.duration,
+          stops: getStopsLabel(selectedReturnOffer),
+          airline: selectedReturnOffer.owner?.name ?? "Airline",
+          cost: `${selectedReturnOffer.totalAmount} ${selectedReturnOffer.totalCurrency}`,
+        })
+      }
+      return next
+    })
+    setSaveConfirmation("Saved outbound and inbound flights.")
+  }
+
   if (!mounted) {
     return (
       <div className="space-y-6">
@@ -669,6 +836,290 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
           <div className="border-input h-9 w-24 animate-pulse rounded-none border bg-muted/50" />
         </div>
         <div className="min-h-[320px] rounded-none border border-border bg-muted/20" />
+      </div>
+    )
+  }
+
+  const showLegacyFlightSearch = true
+  if (!showLegacyFlightSearch) {
+    return (
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CalendarIcon className="size-4" />
+              Search Modes Coming Soon
+            </CardTitle>
+            <p className="text-muted-foreground text-xs">
+              Manual Search and Explore are temporarily hidden while we finish the next iteration.
+            </p>
+          </CardHeader>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <PlaneIcon className="size-4" />
+              Inbound Flight Lookup
+            </CardTitle>
+            <p className="text-muted-foreground text-xs">
+              Enter flight number and departure date. We will auto-fill route, local times, timezone, airline, duration, and terminal/gate when available.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="space-y-2">
+                <Label>Flight number</Label>
+                <input
+                  type="text"
+                  value={lookupFlightNumber}
+                  onChange={(e) => setLookupFlightNumber(e.target.value.toUpperCase())}
+                  placeholder="e.g. AC123"
+                  className="border-input bg-background h-9 w-full rounded-none border px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Departure date</Label>
+                <input
+                  type="date"
+                  value={lookupDate}
+                  onChange={(e) => setLookupDate(e.target.value)}
+                  className="border-input bg-background h-9 w-full rounded-none border px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end">
+              <Button className="rounded-none" onClick={runInboundLookup} disabled={lookupLoading}>
+                {lookupLoading ? "Looking up..." : "Lookup flight"}
+              </Button>
+            </div>
+
+            {lookupError && (
+              <p className="rounded-none border border-destructive/50 bg-destructive/10 p-2 text-xs text-destructive">
+                {lookupError}
+              </p>
+            )}
+
+            {lookupDraft && (
+              <div className="space-y-3 border border-border p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium">
+                      Found: {lookupDraft.airline} {lookupDraft.flightNumber} — {lookupDraft.departureAirportName || lookupDraft.routeFrom} ({lookupDraft.routeFrom}) {lookupDraft.departureLocal} → {lookupDraft.arrivalAirportName || lookupDraft.routeTo} ({lookupDraft.routeTo}) {lookupDraft.arrivalLocal}
+                    </p>
+                    <p className="text-muted-foreground text-xs">
+                      {lookupDraft.departureTimezone ? `${lookupDraft.departureTimezone}` : "Local"} → {lookupDraft.arrivalTimezone ? `${lookupDraft.arrivalTimezone}` : "Local"} · {lookupDraft.duration} · {lookupDraft.stops} {lookupDraft.stops === 1 ? "stop" : "stops"}{lookupDraft.terminalGate ? ` · ${lookupDraft.terminalGate}` : ""}
+                    </p>
+                  </div>
+                  {lookupDraft.airlineLogoUrl && (
+                    <div
+                      aria-label={`${lookupDraft.airline} logo`}
+                      role="img"
+                      className="h-8 w-8 rounded-none border border-border bg-background bg-contain bg-center bg-no-repeat p-1"
+                      style={{ backgroundImage: `url(${lookupDraft.airlineLogoUrl})` }}
+                    />
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button className="rounded-none" onClick={confirmLookupFlight}>
+                    Confirm
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-none"
+                    onClick={() => setLookupEditMode((v) => !v)}
+                  >
+                    {lookupEditMode ? "Close edit" : "Edit"}
+                  </Button>
+                </div>
+
+                {lookupEditMode && (
+                  <div className="space-y-3 border border-border p-3">
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      <div className="space-y-1">
+                        <Label>Airline</Label>
+                        <input
+                          type="text"
+                          value={lookupDraft.airline}
+                          onChange={(e) => updateLookupDraft("airline", e.target.value)}
+                          className="border-input bg-background h-9 w-full rounded-none border px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>From (IATA)</Label>
+                        <input
+                          type="text"
+                          value={lookupDraft.routeFrom}
+                          onChange={(e) => updateLookupDraft("routeFrom", e.target.value.toUpperCase())}
+                          className="border-input bg-background h-9 w-full rounded-none border px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>To (IATA)</Label>
+                        <input
+                          type="text"
+                          value={lookupDraft.routeTo}
+                          onChange={(e) => updateLookupDraft("routeTo", e.target.value.toUpperCase())}
+                          className="border-input bg-background h-9 w-full rounded-none border px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Departure (local)</Label>
+                        <input
+                          type="text"
+                          value={lookupDraft.departureLocal}
+                          onChange={(e) => updateLookupDraft("departureLocal", e.target.value)}
+                          className="border-input bg-background h-9 w-full rounded-none border px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Arrival (local)</Label>
+                        <input
+                          type="text"
+                          value={lookupDraft.arrivalLocal}
+                          onChange={(e) => updateLookupDraft("arrivalLocal", e.target.value)}
+                          className="border-input bg-background h-9 w-full rounded-none border px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Duration</Label>
+                        <input
+                          type="text"
+                          value={lookupDraft.duration}
+                          onChange={(e) => updateLookupDraft("duration", e.target.value)}
+                          className="border-input bg-background h-9 w-full rounded-none border px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Terminal / gate</Label>
+                        <input
+                          type="text"
+                          value={lookupDraft.terminalGate ?? ""}
+                          onChange={(e) => updateLookupDraft("terminalGate", e.target.value)}
+                          className="border-input bg-background h-9 w-full rounded-none border px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Stops</Label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={lookupDraft.stops}
+                          onChange={(e) =>
+                            updateLookupDraft("stops", Math.max(0, Number(e.target.value) || 0))
+                          }
+                          className="border-input bg-background h-9 w-full rounded-none border px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Cost (USD)</Label>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={lookupDraft.cost}
+                          onChange={(e) => updateLookupDraft("cost", e.target.value)}
+                          placeholder="optional"
+                          className="border-input bg-background h-9 w-full rounded-none border px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                        />
+                      </div>
+                    </div>
+
+                    {lookupDraft.stops > 0 && (
+                      <div className="space-y-3 border border-border p-3">
+                        <div className="flex items-center justify-between">
+                          <Label className="text-xs">Stop Details and Layovers</Label>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="rounded-none"
+                            onClick={addLookupStopDetail}
+                          >
+                            <PlusIcon className="size-3.5" />
+                            Add stop
+                          </Button>
+                        </div>
+                        {lookupDraft.stopDetails.map((row, index) => (
+                          <div key={index} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+                            <input
+                              type="text"
+                              value={row.airport}
+                              onChange={(e) =>
+                                updateLookupStopDetail(index, "airport", e.target.value)
+                              }
+                              placeholder="Stop airport"
+                              className="border-input bg-background h-9 w-full rounded-none border px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                            />
+                            <input
+                              type="text"
+                              value={row.layover}
+                              onChange={(e) =>
+                                updateLookupStopDetail(index, "layover", e.target.value)
+                              }
+                              placeholder="Layover (e.g. 1h 20m)"
+                              className="border-input bg-background h-9 w-full rounded-none border px-3 py-1 text-xs outline-none focus:ring-1 focus:ring-ring"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="rounded-none"
+                              onClick={() => removeLookupStopDetail(index)}
+                            >
+                              <Trash2Icon className="size-3.5" />
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {inboundEntries.length > 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Saved Inbound Flights</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {inboundEntries.map((entry) => (
+                <div key={entry.id} className="space-y-2 border border-border p-3">
+                  <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                    <p><span className="font-medium">Flight:</span> {entry.flightNumber}</p>
+                    <p><span className="font-medium">Airline:</span> {entry.airline}</p>
+                    <p><span className="font-medium">Date:</span> {entry.date}</p>
+                    <p><span className="font-medium">Route:</span> {entry.routeFrom} → {entry.routeTo}</p>
+                    <p><span className="font-medium">Departure:</span> {entry.departureLocal}</p>
+                    <p><span className="font-medium">Arrival:</span> {entry.arrivalLocal}</p>
+                    <p><span className="font-medium">Duration:</span> {entry.duration}</p>
+                    <p><span className="font-medium">Stops:</span> {entry.stops}</p>
+                    <p><span className="font-medium">Cost:</span> {entry.cost ? `$${entry.cost}` : "—"}</p>
+                    <p><span className="font-medium">Terminal/Gate:</span> {entry.terminalGate || "—"}</p>
+                  </div>
+                  {entry.stopDetails.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium">Stop / Layover Details</p>
+                      <ul className="text-muted-foreground space-y-1 text-xs">
+                        {entry.stopDetails.map((s, i) => (
+                          <li key={i}>
+                            Stop {i + 1}: {s.airport || "—"} · Layover: {s.layover || "—"}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
       </div>
     )
   }
@@ -726,8 +1177,13 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                 Manual flight search
               </CardTitle>
               <p className="text-muted-foreground text-xs">
-                One way, round trip, or multi city for {trip.destination}. Select an offer then book on the airline.
+                One way, round trip, or multi city for {trip.destination}. Select an offer and save your preferred options.
               </p>
+              {flightApi === "serpapi" && tripType === "multi_city" && (
+                <p className="text-muted-foreground text-xs">
+                  Multi-city currently searches via Duffel even when SerpAPI is selected.
+                </p>
+              )}
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex flex-wrap gap-2">
@@ -1004,6 +1460,16 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                 {isSerpRoundTripTwoStep &&
                   `: ${origin?.displayName ?? origin?.iataCode} → ${destination?.displayName ?? destination?.iataCode}`}
               </h2>
+              {isSerpRoundTripTwoStep && (
+                <p className="text-muted-foreground text-xs">
+                  Step 1: select outbound. Step 2: select inbound. Step 3: confirm save.
+                </p>
+              )}
+              {saveConfirmation && (
+                <p className="rounded-none border border-primary/30 bg-primary/10 p-2 text-xs text-primary">
+                  {saveConfirmation}
+                </p>
+              )}
               <div className="border-border flex flex-wrap items-center gap-3 rounded-none border bg-muted/30 p-3">
                 <span className="text-muted-foreground flex items-center gap-1.5 text-xs font-medium">
                   <FilterIcon className="size-3.5" />
@@ -1132,7 +1598,6 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                     {manualFilteredAndSortedOffers.map((offer) => {
                       const row = getOfferRow(offer)
                       const airlineName = offer.owner?.name ?? "Airline"
-                      const bookUrl = getBookUrl(offer)
                       const selectedOutbound = isSerpRoundTripTwoStep && selectedOutboundOfferId === offer.id
                       const selected = !isSerpRoundTripTwoStep && selectedOfferId === offer.id
                       const selectedAny = selected || selectedOutbound
@@ -1187,6 +1652,8 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                                     setSelectedOfferId(null)
                                     if (next && offer.departureToken) {
                                       fetchReturnFlights(offer)
+                                      setSaveConfirmation("Outbound selected. Now select your inbound flight.")
+                                      setFlightStepTab("return")
                                     } else {
                                       setReturnOffers([])
                                       setSelectedReturnOfferId(null)
@@ -1213,29 +1680,14 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                             </td>
                             <td className="p-2">
                               {!isSerpRoundTripTwoStep && (
-                                offer.bookingToken ? (
-                                  <Button
-                                    variant="default"
-                                    size="sm"
-                                    className="rounded-none inline-flex items-center gap-1"
-                                    onClick={() => submitBookingRedirect(offer)}
-                                  >
-                                    Book
-                                    <ExternalLinkIcon className="size-3.5" />
-                                  </Button>
-                                ) : (
-                                  <Button asChild variant="default" size="sm" className="rounded-none">
-                                    <a
-                                      href={bookUrl}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="inline-flex items-center gap-1"
-                                    >
-                                      Book
-                                      <ExternalLinkIcon className="size-3.5" />
-                                    </a>
-                                  </Button>
-                                )
+                                <Button
+                                  variant="default"
+                                  size="sm"
+                                  className="rounded-none"
+                                  onClick={() => saveFlightChoice(offer, "manual")}
+                                >
+                                  Save
+                                </Button>
                               )}
                               {isSerpRoundTripTwoStep && (
                                 <span className="text-muted-foreground text-xs">—</span>
@@ -1328,7 +1780,6 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                               {returnOffers.map((offer) => {
                                 const row = getOfferRow(offer)
                                 const airlineName = offer.owner?.name ?? "Airline"
-                                const bookUrlRet = getBookUrl(offer)
                                 const selectedRet = selectedReturnOfferId === offer.id
                                 const hasStopsRet = getStopsCount(offer) >= 1
                                 const isExpandedRet = expandedReturnOfferIds.has(offer.id)
@@ -1383,29 +1834,7 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                                         </Button>
                                       </td>
                                       <td className="p-2">
-                                        {offer.bookingToken ? (
-                                          <Button
-                                            variant="default"
-                                            size="sm"
-                                            className="rounded-none inline-flex items-center gap-1"
-                                            onClick={() => submitBookingRedirect(offer)}
-                                          >
-                                            Book
-                                            <ExternalLinkIcon className="size-3.5" />
-                                          </Button>
-                                        ) : (
-                                          <Button asChild variant="default" size="sm" className="rounded-none">
-                                            <a
-                                              href={bookUrlRet}
-                                              target="_blank"
-                                              rel="noopener noreferrer"
-                                              className="inline-flex items-center gap-1"
-                                            >
-                                              Book
-                                              <ExternalLinkIcon className="size-3.5" />
-                                            </a>
-                                          </Button>
-                                        )}
+                                        <span className="text-muted-foreground text-xs">—</span>
                                       </td>
                                     </tr>
                                     {hasStopsRet && isExpandedRet && stopDetailsRet.length > 0 && (
@@ -1471,27 +1900,13 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                         <span className="text-xs font-medium">
                           Outbound + Return: {offerForBook.owner?.name} — {offerForBook.totalAmount} {offerForBook.totalCurrency}
                         </span>
-                        {offerForBook.bookingToken ? (
-                          <Button
-                            size="sm"
-                            className="rounded-none"
-                            onClick={() => submitBookingRedirect(offerForBook)}
-                          >
-                            Book on airline
-                            <ExternalLinkIcon className="ml-1 size-3.5" />
-                          </Button>
-                        ) : (
-                          <Button asChild size="sm" className="rounded-none">
-                            <a
-                              href={getBookUrl(offerForBook)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                            >
-                              Book on airline
-                              <ExternalLinkIcon className="ml-1 size-3.5" />
-                            </a>
-                          </Button>
-                        )}
+                        <Button
+                          size="sm"
+                          className="rounded-none"
+                          onClick={saveRoundTripSelection}
+                        >
+                          Confirm save
+                        </Button>
                       </div>
                     )}
                   </TabsContent>
@@ -1518,7 +1933,6 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                         {manualFilteredAndSortedOffers.map((offer) => {
                           const row = getOfferRow(offer)
                           const airlineName = offer.owner?.name ?? "Airline"
-                          const bookUrl = getBookUrl(offer)
                           const selected = selectedOfferId === offer.id
                           const hasStops = getStopsCount(offer) >= 1
                           const isExpanded = expandedManualOfferIds.has(offer.id)
@@ -1549,19 +1963,14 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                                   </Button>
                                 </td>
                                 <td className="p-2">
-                                  {offer.bookingToken ? (
-                                    <Button variant="default" size="sm" className="rounded-none inline-flex items-center gap-1" onClick={() => submitBookingRedirect(offer)}>
-                                      Book
-                                      <ExternalLinkIcon className="size-3.5" />
-                                    </Button>
-                                  ) : (
-                                    <Button asChild variant="default" size="sm" className="rounded-none">
-                                      <a href={bookUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1">
-                                        Book
-                                        <ExternalLinkIcon className="size-3.5" />
-                                      </a>
-                                    </Button>
-                                  )}
+                                  <Button
+                                    variant="default"
+                                    size="sm"
+                                    className="rounded-none"
+                                    onClick={() => saveFlightChoice(offer, "manual")}
+                                  >
+                                    Save
+                                  </Button>
                                 </td>
                               </tr>
                               {hasStops && isExpanded && stopDetails.length > 0 && (
@@ -1593,19 +2002,13 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                       <span className="text-xs font-medium">
                         Selected: {offerForBook.owner?.name} — {offerForBook.totalAmount} {offerForBook.totalCurrency}
                       </span>
-                      {offerForBook.bookingToken ? (
-                        <Button size="sm" className="rounded-none" onClick={() => submitBookingRedirect(offerForBook)}>
-                          Book on airline
-                          <ExternalLinkIcon className="ml-1 size-3.5" />
-                        </Button>
-                      ) : (
-                        <Button asChild size="sm" className="rounded-none">
-                          <a href={getBookUrl(offerForBook)} target="_blank" rel="noopener noreferrer">
-                            Book on airline
-                            <ExternalLinkIcon className="ml-1 size-3.5" />
-                          </a>
-                        </Button>
-                      )}
+                      <Button
+                        size="sm"
+                        className="rounded-none"
+                        onClick={() => saveFlightChoice(offerForBook, "manual-selected")}
+                      >
+                        Save selection
+                      </Button>
                     </div>
                   )}
                 </>
@@ -1788,7 +2191,6 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                       const { date, destinationName, offer } = row
                       const rowKey = `${row.destination}-${date}-${offer.id}`
                       const airlineName = offer.owner?.name ?? "Airline"
-                      const bookUrl = getBookUrl(offer)
                       const selected = expSelectedOfferId === offer.id
                       const hasStops = getStopsCount(offer) >= 1
                       const isExpanded = expandedExpRowKeys.has(rowKey)
@@ -1842,29 +2244,14 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                               </Button>
                             </td>
                             <td className="p-2">
-                              {offer.bookingToken ? (
-                                <Button
-                                  variant="default"
-                                  size="sm"
-                                  className="rounded-none inline-flex items-center gap-1"
-                                  onClick={() => submitBookingRedirect(offer)}
-                                >
-                                  Book
-                                  <ExternalLinkIcon className="size-3.5" />
-                                </Button>
-                              ) : (
-                                <Button asChild variant="default" size="sm" className="rounded-none">
-                                  <a
-                                    href={bookUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1"
-                                  >
-                                    Book
-                                    <ExternalLinkIcon className="size-3.5" />
-                                  </a>
-                                </Button>
-                              )}
+                              <Button
+                                variant="default"
+                                size="sm"
+                                className="rounded-none"
+                                onClick={() => saveFlightChoice(offer, "explore")}
+                              >
+                                Save
+                              </Button>
                             </td>
                           </tr>
                           {hasStops && isExpanded && stopDetails.length > 0 && (
@@ -1906,6 +2293,32 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
           )}
         </TabsContent>
       </Tabs>
+      {savedFlights.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Saved Flights</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {savedFlights.map((f) => (
+              <div key={f.id} className="flex flex-wrap items-center justify-between gap-2 border border-border p-2 text-xs">
+                <span>
+                  <span className="font-medium">{f.source}</span> · {f.route} · {f.date} · {f.departure} → {f.arrival} · {f.airline} · {f.cost}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-none"
+                  onClick={() =>
+                    setSavedFlights((prev) => prev.filter((x) => x.id !== f.id))
+                  }
+                >
+                  Remove
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

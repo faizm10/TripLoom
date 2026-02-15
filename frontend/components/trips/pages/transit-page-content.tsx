@@ -81,7 +81,11 @@ type MapPreview = {
   mode: TransitMode
   label: string
   providerRouteRef?: string
+  departureTimeLocal?: string
+  arrivalTimeLocal?: string
 }
+
+type TimeFilterMode = "depart" | "arrive"
 
 const modeOptions: TransitMode[] = [
   "subway",
@@ -156,6 +160,43 @@ function buildDayWeekdayMap(startDate: string, totalDays: number): Record<number
     mapping[i] = weekdayNames[date.getDay()]
   }
   return mapping
+}
+
+function buildTripDayDateTime(
+  startDate: string,
+  dayIndex: number,
+  hour: number,
+  minute: number
+): string {
+  const date = parseLocalDate(startDate)
+  date.setDate(date.getDate() + (dayIndex - 1))
+  const yyyy = date.getFullYear()
+  const mm = String(date.getMonth() + 1).padStart(2, "0")
+  const dd = String(date.getDate()).padStart(2, "0")
+  const hh = String(hour).padStart(2, "0")
+  const min = String(minute).padStart(2, "0")
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`
+}
+
+function applyDayToDateTime(
+  value: string,
+  startDate: string,
+  dayIndex: number
+): string {
+  if (!value) return value
+  const targetDate = parseLocalDate(startDate)
+  targetDate.setDate(targetDate.getDate() + (dayIndex - 1))
+
+  const parsed = new Date(value)
+  const hours = Number.isNaN(parsed.getTime()) ? 9 : parsed.getHours()
+  const minutes = Number.isNaN(parsed.getTime()) ? 0 : parsed.getMinutes()
+
+  const yyyy = targetDate.getFullYear()
+  const mm = String(targetDate.getMonth() + 1).padStart(2, "0")
+  const dd = String(targetDate.getDate()).padStart(2, "0")
+  const hh = String(hours).padStart(2, "0")
+  const min = String(minutes).padStart(2, "0")
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`
 }
 
 function buildEmptyDraft(): ManualDraft {
@@ -236,8 +277,29 @@ function parseRoutePairsFromText(text: string): Array<{ fromLabel: string; toLab
   return pairs
 }
 
-function buildDirectionsUrl(fromLabel: string, toLabel: string): string {
-  return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(fromLabel)}&destination=${encodeURIComponent(toLabel)}&travelmode=transit`
+function buildDirectionsUrl(
+  fromLabel: string,
+  toLabel: string,
+  departureTimeLocal?: string,
+  arrivalTimeLocal?: string
+): string {
+  const params = new URLSearchParams({
+    api: "1",
+    origin: fromLabel,
+    destination: toLabel,
+    travelmode: "transit",
+  })
+
+  const departure = departureTimeLocal ? new Date(departureTimeLocal) : null
+  const arrival = arrivalTimeLocal ? new Date(arrivalTimeLocal) : null
+
+  if (arrival && !Number.isNaN(arrival.getTime())) {
+    params.set("arrival_time", String(Math.floor(arrival.getTime() / 1000)))
+  } else if (departure && !Number.isNaN(departure.getTime())) {
+    params.set("departure_time", String(Math.floor(departure.getTime() / 1000)))
+  }
+
+  return `https://www.google.com/maps/dir/?${params.toString()}`
 }
 
 function buildEmbedMapUrl(preview: MapPreview | null): string | null {
@@ -251,6 +313,17 @@ function buildEmbedMapUrl(preview: MapPreview | null): string | null {
     destination: preview.toLabel,
     mode: "transit",
   })
+
+  const departure = preview.departureTimeLocal
+    ? new Date(preview.departureTimeLocal)
+    : null
+  const arrival = preview.arrivalTimeLocal ? new Date(preview.arrivalTimeLocal) : null
+
+  if (arrival && !Number.isNaN(arrival.getTime())) {
+    params.set("arrival_time", String(Math.floor(arrival.getTime() / 1000)))
+  } else if (departure && !Number.isNaN(departure.getTime())) {
+    params.set("departure_time", String(Math.floor(departure.getTime() / 1000)))
+  }
 
   return `https://www.google.com/maps/embed/v1/directions?${params.toString()}`
 }
@@ -281,6 +354,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
   const [dayIndex, setDayIndex] = React.useState<number>(1)
   const [fromLabel, setFromLabel] = React.useState("")
   const [toLabel, setToLabel] = React.useState("")
+  const [timeFilterMode, setTimeFilterMode] = React.useState<TimeFilterMode>("depart")
   const [departureTime, setDepartureTime] = React.useState("")
   const [arrivalByTime, setArrivalByTime] = React.useState("")
 
@@ -312,6 +386,49 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
     [mapPreview]
   )
 
+  React.useEffect(() => {
+    if (!departureTime && !arrivalByTime) {
+      if (timeFilterMode === "depart") {
+        setDepartureTime(buildTripDayDateTime(trip.startDate, dayIndex, 9, 0))
+      } else {
+        setArrivalByTime(buildTripDayDateTime(trip.startDate, dayIndex, 9, 0))
+      }
+      return
+    }
+    if (departureTime) {
+      setDepartureTime((prev) => applyDayToDateTime(prev, trip.startDate, dayIndex))
+    }
+    if (arrivalByTime) {
+      setArrivalByTime((prev) => applyDayToDateTime(prev, trip.startDate, dayIndex))
+    }
+  }, [arrivalByTime, dayIndex, departureTime, timeFilterMode, trip.startDate])
+
+  React.useEffect(() => {
+    setManualDraft((prev) => {
+      const nextDeparture = applyDayToDateTime(
+        prev.departureTimeLocal,
+        trip.startDate,
+        prev.dayIndex
+      )
+      const nextArrival = applyDayToDateTime(
+        prev.arrivalTimeLocal,
+        trip.startDate,
+        prev.dayIndex
+      )
+      if (
+        nextDeparture === prev.departureTimeLocal &&
+        nextArrival === prev.arrivalTimeLocal
+      ) {
+        return prev
+      }
+      return {
+        ...prev,
+        departureTimeLocal: nextDeparture,
+        arrivalTimeLocal: nextArrival,
+      }
+    })
+  }, [trip.startDate, manualDraft.dayIndex])
+
   function syncManualFromLookup() {
     setManualDraft((prev) => ({
       ...prev,
@@ -329,6 +446,8 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
       mode: "walk_mix",
       label: `${fromLabel} → ${toLabel}`,
       providerRouteRef: "",
+      departureTimeLocal: timeFilterMode === "depart" ? departureTime || undefined : undefined,
+      arrivalTimeLocal: timeFilterMode === "arrive" ? arrivalByTime || undefined : undefined,
     })
   }
 
@@ -357,9 +476,17 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
       return
     }
 
-    if (departureTime && arrivalByTime) {
-      setProviderError("Use either departure time or arrive-by time, not both.")
-      return
+    let departureTimeParam =
+      timeFilterMode === "depart" ? departureTime || undefined : undefined
+    let arrivalTimeParam =
+      timeFilterMode === "arrive" ? arrivalByTime || undefined : undefined
+
+    if (!departureTimeParam && !arrivalTimeParam) {
+      const fallback = buildTripDayDateTime(trip.startDate, dayIndex, 9, 0)
+      departureTimeParam = fallback
+      setDepartureTime(fallback)
+      setArrivalByTime("")
+      setTimeFilterMode("depart")
     }
 
     syncManualFromLookup()
@@ -373,8 +500,8 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
           origin,
           destination,
           day_index: dayIndex,
-          departure_time: departureTime || undefined,
-          arrival_time: arrivalByTime || undefined,
+          departure_time: departureTimeParam,
+          arrival_time: arrivalTimeParam,
         }),
       })
 
@@ -403,6 +530,8 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
           mode: first.mode,
           label: first.summaryLabel,
           providerRouteRef: first.providerRouteRef,
+          departureTimeLocal: first.departureTimeLocal ?? departureTimeParam,
+          arrivalTimeLocal: first.arrivalTimeLocal ?? arrivalTimeParam,
         })
       }
     } catch {
@@ -426,6 +555,8 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
       mode: option.mode,
       label: option.summaryLabel,
       providerRouteRef: option.providerRouteRef,
+      departureTimeLocal: option.departureTimeLocal,
+      arrivalTimeLocal: option.arrivalTimeLocal,
     })
   }
 
@@ -515,6 +646,8 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
       mode: normalizedRoute.mode,
       label: `${normalizedRoute.fromLabel} → ${normalizedRoute.toLabel}`,
       providerRouteRef: normalizedRoute.providerRouteRef,
+      departureTimeLocal: normalizedRoute.departureTimeLocal,
+      arrivalTimeLocal: normalizedRoute.arrivalTimeLocal,
     })
 
     setEditingRouteId(null)
@@ -562,6 +695,8 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
       mode: immediateRoute.mode,
       label: selected.summaryLabel,
       providerRouteRef: immediateRoute.providerRouteRef,
+      departureTimeLocal: immediateRoute.departureTimeLocal,
+      arrivalTimeLocal: immediateRoute.arrivalTimeLocal,
     })
   }
 
@@ -596,6 +731,8 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
       mode: route.mode,
       label: `${route.fromLabel} → ${route.toLabel}`,
       providerRouteRef: route.providerRouteRef,
+      departureTimeLocal: route.departureTimeLocal,
+      arrivalTimeLocal: route.arrivalTimeLocal,
     })
   }
 
@@ -658,7 +795,13 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
   }, [routes])
 
   const externalMapUrl = mapPreview
-    ? buildDirectionsUrl(mapPreview.fromLabel, mapPreview.toLabel)
+    ? (mapEmbedUrl ||
+      buildDirectionsUrl(
+        mapPreview.fromLabel,
+        mapPreview.toLabel,
+        mapPreview.departureTimeLocal,
+        mapPreview.arrivalTimeLocal
+      ))
     : null
 
   return (
@@ -731,28 +874,84 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
 
               <div className="grid gap-3 lg:grid-cols-2">
                 <div className="space-y-1.5">
-                  <Label>Departure time (optional)</Label>
-                  <Input
-                    type="datetime-local"
-                    value={departureTime}
-                    onChange={(event) => {
-                      setDepartureTime(event.target.value)
-                      if (event.target.value) setArrivalByTime("")
-                    }}
-                  />
+                  <Label>Time filter</Label>
+                  <Select
+                    value={timeFilterMode}
+                    onValueChange={(value) => setTimeFilterMode(value as TimeFilterMode)}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="depart">Leave at</SelectItem>
+                      <SelectItem value="arrive">Arrive by</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Arrival by (optional)</Label>
+                  <Label>
+                    {timeFilterMode === "depart"
+                      ? "Departure time (optional)"
+                      : "Arrival by (optional)"}
+                  </Label>
                   <Input
                     type="datetime-local"
-                    value={arrivalByTime}
+                    value={timeFilterMode === "depart" ? departureTime : arrivalByTime}
                     onChange={(event) => {
-                      setArrivalByTime(event.target.value)
-                      if (event.target.value) setDepartureTime("")
+                      if (timeFilterMode === "depart") {
+                        setDepartureTime(event.target.value)
+                        if (event.target.value) setArrivalByTime("")
+                      } else {
+                        setArrivalByTime(event.target.value)
+                        if (event.target.value) setDepartureTime("")
+                      }
                     }}
                   />
                 </div>
               </div>
+
+              <div className="flex flex-wrap gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const value = buildTripDayDateTime(trip.startDate, dayIndex, 8, 0)
+                    if (timeFilterMode === "depart") setDepartureTime(value)
+                    else setArrivalByTime(value)
+                  }}
+                >
+                  Morning
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const value = buildTripDayDateTime(trip.startDate, dayIndex, 13, 0)
+                    if (timeFilterMode === "depart") setDepartureTime(value)
+                    else setArrivalByTime(value)
+                  }}
+                >
+                  Midday
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const value = buildTripDayDateTime(trip.startDate, dayIndex, 18, 0)
+                    if (timeFilterMode === "depart") setDepartureTime(value)
+                    else setArrivalByTime(value)
+                  }}
+                >
+                  Evening
+                </Button>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                If no time is set, search uses 9:00 AM on the selected trip day (not “leave now”).
+              </p>
 
               <div className="flex justify-end">
                 <Button onClick={handleFindSuggestions} disabled={providerLoading}>
@@ -1116,6 +1315,8 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                                       mode: route.mode,
                                       label: `${route.fromLabel} → ${route.toLabel}`,
                                       providerRouteRef: route.providerRouteRef,
+                                      departureTimeLocal: route.departureTimeLocal,
+                                      arrivalTimeLocal: route.arrivalTimeLocal,
                                     })
                                   }
                                 >

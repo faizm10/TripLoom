@@ -7,13 +7,13 @@ import {
   EyeIcon,
   PencilIcon,
   RouteIcon,
-  SearchIcon,
   Trash2Icon,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { useUpdateTrip } from "@/components/providers/trips-provider"
 import { useTripPage } from "@/components/trips/trip-shell"
+import { TransitPlaceSearch } from "@/components/trips/transit-place-search"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -27,15 +27,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { Textarea } from "@/components/ui/textarea"
+  Textarea,
+} from "@/components/ui/textarea"
 import {
   getTripTransitRoutes,
   type TransitMode,
@@ -108,6 +103,16 @@ const modeLabels: Record<TransitMode, string> = {
   other: "Other",
 }
 
+const weekdayNames = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const
+
 function sortRoutes(routes: TransitRoute[]): TransitRoute[] {
   return [...routes].sort((a, b) => {
     if (a.dayIndex !== b.dayIndex) return a.dayIndex - b.dayIndex
@@ -120,11 +125,37 @@ function sortRoutes(routes: TransitRoute[]): TransitRoute[] {
 
 function formatTime(value?: string): string {
   if (!value) return "Time TBD"
-  return value.replace("T", " ")
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value.replace("T", " ")
+  }
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(parsed)
 }
 
 function formatMoney(cost: number, currency: string): string {
   return `${currency} ${cost.toFixed(2)}`
+}
+
+function parseLocalDate(date: string): Date {
+  const [year, month, day] = date.split("-").map(Number)
+  return new Date(year, (month || 1) - 1, day || 1)
+}
+
+function buildDayWeekdayMap(startDate: string, totalDays: number): Record<number, string> {
+  const start = parseLocalDate(startDate)
+  const mapping: Record<number, string> = {}
+  for (let i = 1; i <= totalDays; i += 1) {
+    const date = new Date(start)
+    date.setDate(start.getDate() + (i - 1))
+    mapping[i] = weekdayNames[date.getDay()]
+  }
+  return mapping
 }
 
 function buildEmptyDraft(): ManualDraft {
@@ -261,16 +292,18 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
   const [manualDraft, setManualDraft] = React.useState<ManualDraft>(buildEmptyDraft())
   const [manualError, setManualError] = React.useState<string | null>(null)
   const [editingRouteId, setEditingRouteId] = React.useState<string | null>(null)
+  const [inputTab, setInputTab] = React.useState<"route" | "manual">("route")
 
   const [mapPreview, setMapPreview] = React.useState<MapPreview | null>(null)
-  const [routeSearch, setRouteSearch] = React.useState("")
-  const [routeProviderFilter, setRouteProviderFilter] = React.useState<"all" | "google_maps" | "manual">("all")
-  const [routeDayFilter, setRouteDayFilter] = React.useState<"all" | number>("all")
   const [bulkText, setBulkText] = React.useState("")
 
   const dayOptions = React.useMemo(
     () => Array.from({ length: trip.totalDays }, (_, idx) => idx + 1),
     [trip.totalDays]
+  )
+  const dayWeekdayMap = React.useMemo(
+    () => buildDayWeekdayMap(trip.startDate, trip.totalDays),
+    [trip.startDate, trip.totalDays]
   )
 
   const mapEmbedUrl = React.useMemo(() => buildEmbedMapUrl(mapPreview), [mapPreview])
@@ -533,6 +566,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
   }
 
   function handleEditRoute(route: TransitRoute) {
+    setInputTab("manual")
     setEditingRouteId(route.id)
     setManualError(null)
     setManualDraft({
@@ -613,36 +647,15 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
     setBulkText("")
   }
 
-  const filteredRoutes = React.useMemo(() => {
-    const q = routeSearch.trim().toLowerCase()
-    return routes.filter((route) => {
-      if (routeProviderFilter !== "all" && route.provider !== routeProviderFilter) return false
-      if (routeDayFilter !== "all" && route.dayIndex !== routeDayFilter) return false
-      if (!q) return true
-      const blob = [
-        route.fromLabel,
-        route.toLabel,
-        route.notes ?? "",
-        route.mode,
-        route.provider,
-        route.currency,
-        route.referenceUrl ?? "",
-      ]
-        .join(" ")
-        .toLowerCase()
-      return blob.includes(q)
-    })
-  }, [routeDayFilter, routeProviderFilter, routeSearch, routes])
-
   const groupedRoutes = React.useMemo(() => {
     const grouped = new Map<number, TransitRoute[]>()
-    for (const route of filteredRoutes) {
+    for (const route of routes) {
       const existing = grouped.get(route.dayIndex) ?? []
       existing.push(route)
       grouped.set(route.dayIndex, existing)
     }
     return grouped
-  }, [filteredRoutes])
+  }, [routes])
 
   const externalMapUrl = mapPreview
     ? buildDirectionsUrl(mapPreview.fromLabel, mapPreview.toLabel)
@@ -663,9 +676,25 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
         <div className="space-y-4 xl:col-span-2">
           <Card>
             <CardHeader>
-              <CardTitle>Step 1: Enter Route</CardTitle>
+              <CardTitle>Input Mode</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent>
+              <Tabs value={inputTab} onValueChange={(value) => setInputTab(value as "route" | "manual")}>
+                <TabsList variant="line" className="w-full">
+                  <TabsTrigger value="route">Enter Route</TabsTrigger>
+                  <TabsTrigger value="manual">Manual Entry</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </CardContent>
+          </Card>
+
+          {inputTab === "route" ? (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Step 1: Enter Route</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
               <div className="grid gap-3 lg:grid-cols-4">
                 <div className="space-y-1.5">
                   <Label>Day</Label>
@@ -676,7 +705,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                     <SelectContent>
                       {dayOptions.map((day) => (
                         <SelectItem key={day} value={String(day)}>
-                          Day {day}
+                          Day {day} ({dayWeekdayMap[day]})
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -684,11 +713,19 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                 </div>
                 <div className="space-y-1.5 lg:col-span-2">
                   <Label>From</Label>
-                  <Input value={fromLabel} onChange={(event) => setFromLabel(event.target.value)} placeholder="Point A" />
+                  <TransitPlaceSearch
+                    value={fromLabel}
+                    onChange={setFromLabel}
+                    placeholder="Point A"
+                  />
                 </div>
                 <div className="space-y-1.5 lg:col-span-1">
                   <Label>To</Label>
-                  <Input value={toLabel} onChange={(event) => setToLabel(event.target.value)} placeholder="Point B" />
+                  <TransitPlaceSearch
+                    value={toLabel}
+                    onChange={setToLabel}
+                    placeholder="Point B"
+                  />
                 </div>
               </div>
 
@@ -722,14 +759,14 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                   {providerLoading ? "Finding options..." : "Find Transit Options"}
                 </Button>
               </div>
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Step 2: Pick Suggestion or Continue Manually</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Step 2: Pick Suggestion or Continue Manually</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
               {providerError ? (
                 <Alert variant="destructive">
                   <CircleAlertIcon className="size-4" />
@@ -765,6 +802,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                   <div className="flex flex-wrap gap-2 pt-1">
                     <Button onClick={handleSaveSelectedSuggestion}>Save selected route</Button>
                     <Button variant="outline" onClick={() => {
+                      setInputTab("manual")
                       syncManualFromLookup()
                       setManualError(null)
                     }}>
@@ -777,14 +815,67 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                   No suggestion chosen yet. Run a lookup or continue with manual save in step 3.
                 </p>
               )}
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            </>
+          ) : null}
 
           <Card>
             <CardHeader>
-              <CardTitle>{editingRouteId ? "Step 3: Edit Saved Route" : "Step 3: Manual Save"}</CardTitle>
+              <CardTitle>Route Map Preview</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
+              {mapPreview ? (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    {mapPreview.label} • {modeLabels[mapPreview.mode]}
+                  </p>
+                  {mapStaticUrl ? (
+                    <img
+                      src={mapStaticUrl}
+                      alt="Transit route preview"
+                      className="h-[460px] w-full border object-cover"
+                    />
+                  ) : mapEmbedUrl ? (
+                    <iframe
+                      title="Transit route map"
+                      src={mapEmbedUrl}
+                      loading="lazy"
+                      className="h-[460px] w-full border"
+                      referrerPolicy="no-referrer-when-downgrade"
+                    />
+                  ) : (
+                    <Alert>
+                      <CircleAlertIcon className="size-4" />
+                      <AlertTitle>Map key missing</AlertTitle>
+                      <AlertDescription>
+                        Set <code>NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY</code> for embed or static map preview.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+
+                  {externalMapUrl ? (
+                    <Button asChild className="w-full" variant="outline">
+                      <a href={externalMapUrl} target="_blank" rel="noreferrer">
+                        Open live route in Google Maps
+                      </a>
+                    </Button>
+                  ) : null}
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Choose a suggestion or saved route to preview the map.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          {inputTab === "manual" ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>{editingRouteId ? "Step 3: Edit Saved Route" : "Step 3: Manual Save"}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
               {manualError ? (
                 <Alert variant="destructive">
                   <CircleAlertIcon className="size-4" />
@@ -808,7 +899,7 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                     <SelectContent>
                       {dayOptions.map((day) => (
                         <SelectItem key={day} value={String(day)}>
-                          Day {day}
+                          Day {day} ({dayWeekdayMap[day]})
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -816,20 +907,22 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                 </div>
                 <div className="space-y-1.5 lg:col-span-1">
                   <Label>From</Label>
-                  <Input
+                  <TransitPlaceSearch
                     value={manualDraft.fromLabel}
-                    onChange={(event) =>
-                      setManualDraft((prev) => ({ ...prev, fromLabel: event.target.value }))
+                    onChange={(value) =>
+                      setManualDraft((prev) => ({ ...prev, fromLabel: value }))
                     }
+                    placeholder="Point A"
                   />
                 </div>
                 <div className="space-y-1.5 lg:col-span-1">
                   <Label>To</Label>
-                  <Input
+                  <TransitPlaceSearch
                     value={manualDraft.toLabel}
-                    onChange={(event) =>
-                      setManualDraft((prev) => ({ ...prev, toLabel: event.target.value }))
+                    onChange={(value) =>
+                      setManualDraft((prev) => ({ ...prev, toLabel: value }))
                     }
+                    placeholder="Point B"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -944,59 +1037,17 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
                   </Button>
                 ) : null}
               </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
 
+        <div className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle>Saved Routes</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid gap-2 lg:grid-cols-4">
-                <div className="relative lg:col-span-2">
-                  <SearchIcon className="pointer-events-none absolute top-2.5 left-2 size-3.5 text-muted-foreground" />
-                  <Input
-                    className="pl-7"
-                    value={routeSearch}
-                    onChange={(event) => setRouteSearch(event.target.value)}
-                    placeholder="Search route, city, notes, mode, link..."
-                  />
-                </div>
-                <Select
-                  value={routeProviderFilter}
-                  onValueChange={(value) =>
-                    setRouteProviderFilter(value as "all" | "google_maps" | "manual")
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All providers</SelectItem>
-                    <SelectItem value="google_maps">Google Maps</SelectItem>
-                    <SelectItem value="manual">Manual</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select
-                  value={routeDayFilter === "all" ? "all" : String(routeDayFilter)}
-                  onValueChange={(value) =>
-                    setRouteDayFilter(value === "all" ? "all" : Number(value))
-                  }
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Day" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All days</SelectItem>
-                    {dayOptions.map((day) => (
-                      <SelectItem key={day} value={String(day)}>
-                        Day {day}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
               <div className="space-y-1.5 border p-3">
                 <Label>Import route options from notes (optional)</Label>
                 <Textarea
@@ -1013,159 +1064,90 @@ export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
 
               {routes.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No saved transit routes yet.</p>
-              ) : filteredRoutes.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No routes match the current search/filter.
-                </p>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {Array.from(groupedRoutes.entries())
                     .sort((a, b) => a[0] - b[0])
                     .map(([day, dayRoutes]) => (
                       <div key={day} className="space-y-2">
-                        <h4 className="text-sm font-medium">Day {day}</h4>
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Route</TableHead>
-                              <TableHead>Mode</TableHead>
-                              <TableHead>Duration</TableHead>
-                              <TableHead>Cost</TableHead>
-                              <TableHead>Times</TableHead>
-                              <TableHead>Provider</TableHead>
-                              <TableHead className="text-right">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {dayRoutes.map((route) => (
-                              <TableRow key={route.id}>
-                                <TableCell>
-                                  <p className="font-medium">{route.fromLabel} → {route.toLabel}</p>
-                                  <p className="text-muted-foreground">
-                                    Transfers: {route.transfers ?? 0} • Walk: {route.walkingMinutes ?? 0} min
+                        <h4 className="text-sm font-medium">
+                          Day {day} ({dayWeekdayMap[day]})
+                        </h4>
+                        <div className="grid gap-2">
+                          {dayRoutes.map((route) => (
+                            <div key={route.id} className="border p-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <p className="font-medium text-sm">
+                                    {route.fromLabel} → {route.toLabel}
                                   </p>
-                                  {route.referenceUrl ? (
-                                    <a
-                                      href={route.referenceUrl}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="mt-1 inline-flex items-center gap-1 text-muted-foreground underline"
-                                    >
-                                      <LinkIcon className="size-3" /> Source
-                                    </a>
-                                  ) : null}
-                                </TableCell>
-                                <TableCell>{modeLabels[route.mode]}</TableCell>
-                                <TableCell>{route.durationMinutes} min</TableCell>
-                                <TableCell>{formatMoney(route.estimatedCost, route.currency)}</TableCell>
-                                <TableCell>
-                                  {formatTime(route.departureTimeLocal)}
-                                  <span className="text-muted-foreground"> → </span>
-                                  {formatTime(route.arrivalTimeLocal)}
-                                </TableCell>
-                                <TableCell>
-                                  <Badge variant={route.provider === "google_maps" ? "secondary" : "outline"}>
-                                    {route.provider === "google_maps" ? "Google Maps" : "Manual"}
-                                  </Badge>
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <div className="inline-flex gap-1">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() =>
-                                        setMapPreview({
-                                          fromLabel: route.fromLabel,
-                                          toLabel: route.toLabel,
-                                          mode: route.mode,
-                                          label: `${route.fromLabel} → ${route.toLabel}`,
-                                          providerRouteRef: route.providerRouteRef,
-                                        })
-                                      }
-                                    >
-                                      <EyeIcon /> Preview
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => handleEditRoute(route)}
-                                    >
-                                      <PencilIcon /> Edit
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => handleDeleteRoute(route.id)}
-                                    >
-                                      <Trash2Icon /> Delete
-                                    </Button>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
+                                  <p className="text-xs text-muted-foreground">
+                                    {formatTime(route.departureTimeLocal)} → {formatTime(route.arrivalTimeLocal)}
+                                  </p>
+                                </div>
+                                <Badge variant={route.provider === "google_maps" ? "secondary" : "outline"}>
+                                  {route.provider === "google_maps" ? "Google Maps" : "Manual"}
+                                </Badge>
+                              </div>
+                              <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+                                <span>{modeLabels[route.mode]}</span>
+                                <span>{route.durationMinutes} min</span>
+                                <span>{formatMoney(route.estimatedCost, route.currency)}</span>
+                                <span>Transfers: {route.transfers ?? 0}</span>
+                              </div>
+                              {route.referenceUrl ? (
+                                <a
+                                  href={route.referenceUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground underline"
+                                >
+                                  <LinkIcon className="size-3" /> Source
+                                </a>
+                              ) : null}
+                              <div className="mt-3 grid grid-cols-3 gap-1">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() =>
+                                    setMapPreview({
+                                      fromLabel: route.fromLabel,
+                                      toLabel: route.toLabel,
+                                      mode: route.mode,
+                                      label: `${route.fromLabel} → ${route.toLabel}`,
+                                      providerRouteRef: route.providerRouteRef,
+                                    })
+                                  }
+                                >
+                                  <EyeIcon /> Preview
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleEditRoute(route)}
+                                >
+                                  <PencilIcon /> Edit
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleDeleteRoute(route.id)}
+                                >
+                                  <Trash2Icon /> Delete
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     ))}
                 </div>
               )}
 
-              <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
                 <RouteIcon className="size-4" />
                 Transit saved state updates automatically from this list.
               </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Route Map Preview</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {mapPreview ? (
-                <>
-                  <p className="text-xs text-muted-foreground">
-                    {mapPreview.label} • {modeLabels[mapPreview.mode]}
-                  </p>
-                  {mapStaticUrl ? (
-                    <img
-                      src={mapStaticUrl}
-                      alt="Transit route preview"
-                      className="h-[320px] w-full border object-cover"
-                    />
-                  ) : mapEmbedUrl ? (
-                    <iframe
-                      title="Transit route map"
-                      src={mapEmbedUrl}
-                      loading="lazy"
-                      className="h-[320px] w-full border"
-                      referrerPolicy="no-referrer-when-downgrade"
-                    />
-                  ) : (
-                    <Alert>
-                      <CircleAlertIcon className="size-4" />
-                      <AlertTitle>Map key missing</AlertTitle>
-                      <AlertDescription>
-                        Set <code>NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY</code> for embed or static map preview.
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  {externalMapUrl ? (
-                    <Button asChild className="w-full" variant="outline">
-                      <a href={externalMapUrl} target="_blank" rel="noreferrer">
-                        Open live route in Google Maps
-                      </a>
-                    </Button>
-                  ) : null}
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Choose a suggestion or click Preview on a saved route to load the map.
-                </p>
-              )}
             </CardContent>
           </Card>
 

@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation"
 
-import { TransitPageContent } from "@/components/trips/pages/transit-page-content"
+import { TransitPageClient } from "@/components/trips/pages/transit-page-client"
 import { getTripById } from "@/lib/trips"
 
 export default async function TripTransitPage({
@@ -12,5 +12,5 @@ export default async function TripTransitPage({
   const trip = getTripById(tripId)
   if (!trip) notFound()
 
-  return <TransitPageContent trip={trip} />
+  return <TransitPageClient trip={trip} />
 }

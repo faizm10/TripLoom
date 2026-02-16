@@ -11,46 +11,46 @@ import {
   PopoverContent,
 } from "@/components/ui/popover"
 
-export type DestinationSuggestion = {
+export type TransitPlaceSuggestion = {
   id: string
   name: string
   displayName: string
-  type: "city" | "airport"
-  iataCode: string | null
-  cityName: string | null
-  countryCode: string | null
+  placeId: string
+  mainText: string
+  secondaryText: string | null
+  types: string[]
 }
 
-const DEBOUNCE_MS = 280
+const DEBOUNCE_MS = 260
 const MIN_QUERY_LENGTH = 2
 
-async function searchDestinations(
+async function searchTransitPlaces(
   query: string
-): Promise<DestinationSuggestion[]> {
+): Promise<TransitPlaceSuggestion[]> {
   const params = new URLSearchParams({ q: query })
-  const res = await fetch(`/api/destinations/search?${params}`)
+  const res = await fetch(`/api/transit/places/search?${params}`)
   const json = await res.json()
   if (!res.ok) throw new Error(json?.error ?? "Search failed")
   return json?.data ?? []
 }
 
-export function DestinationSearch({
+export function TransitPlaceSearch({
   value,
   onChange,
   onSelect,
-  placeholder = "Where do you want to go?",
+  placeholder = "Search location",
   className,
   ...inputProps
 }: {
   value?: string
   onChange?: (value: string) => void
-  onSelect?: (suggestion: DestinationSuggestion) => void
+  onSelect?: (suggestion: TransitPlaceSuggestion) => void
   placeholder?: string
   className?: string
-} & Omit<React.ComponentProps<typeof Input>, "value" | "onChange" | "onSelect">) {
+} & Omit<React.ComponentProps<typeof Input>, "value" | "onChange">) {
   const [inputValue, setInputValue] = useState(value ?? "")
   const [query, setQuery] = useState("")
-  const [results, setResults] = useState<DestinationSuggestion[]>([])
+  const [results, setResults] = useState<TransitPlaceSuggestion[]>([])
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
   const [highlightIndex, setHighlightIndex] = useState(0)
@@ -82,7 +82,7 @@ export function DestinationSearch({
   const runSearch = useCallback(async (q: string) => {
     setLoading(true)
     try {
-      const data = await searchDestinations(q)
+      const data = await searchTransitPlaces(q)
       setResults(data)
       setHighlightIndex(0)
       setOpen(true)
@@ -100,7 +100,7 @@ export function DestinationSearch({
   }, [query, runSearch])
 
   const select = useCallback(
-    (suggestion: DestinationSuggestion) => {
+    (suggestion: TransitPlaceSuggestion) => {
       const display = suggestion.displayName
       setInputValue(display)
       onChange?.(display)
@@ -111,7 +111,8 @@ export function DestinationSearch({
     [onChange, onSelect]
   )
 
-  const showPopover = open && (loading || results.length > 0 || query.length >= MIN_QUERY_LENGTH)
+  const showPopover =
+    open && (loading || results.length > 0 || query.length >= MIN_QUERY_LENGTH)
   const list = results
   const canSelect = list.length > 0
 
@@ -155,9 +156,9 @@ export function DestinationSearch({
           role="combobox"
           aria-expanded={showPopover}
           aria-autocomplete="list"
-          aria-controls="destination-search-list"
+          aria-controls="transit-place-search-list"
           aria-activedescendant={
-            canSelect ? `destination-option-${highlightIndex}` : undefined
+            canSelect ? `transit-place-option-${highlightIndex}` : undefined
           }
           value={inputValue}
           onChange={(e) => {
@@ -175,7 +176,7 @@ export function DestinationSearch({
         />
       </PopoverAnchor>
       <PopoverContent
-        id="destination-search-list"
+        id="transit-place-search-list"
         role="listbox"
         className="w-(--radix-popover-trigger-width) max-h-64 overflow-auto p-0"
         align="start"
@@ -184,11 +185,11 @@ export function DestinationSearch({
       >
         {loading ? (
           <div className="text-muted-foreground py-4 text-center text-xs">
-            Searching…
+            Searching transit places...
           </div>
         ) : list.length === 0 ? (
           <div className="text-muted-foreground py-4 text-center text-xs">
-            No destinations found. Try a city or airport name.
+            No transit places found. Try station, neighborhood, or city.
           </div>
         ) : (
           <div ref={listRef} className="py-1">
@@ -197,7 +198,7 @@ export function DestinationSearch({
                 key={suggestion.id}
                 type="button"
                 role="option"
-                id={`destination-option-${index}`}
+                id={`transit-place-option-${index}`}
                 data-index={index}
                 aria-selected={index === highlightIndex}
                 className={cn(
@@ -209,12 +210,12 @@ export function DestinationSearch({
                 onMouseEnter={() => setHighlightIndex(index)}
                 onClick={() => select(suggestion)}
               >
-                <span className="font-medium">{suggestion.displayName}</span>
-                {suggestion.type === "airport" && suggestion.cityName && (
+                <span className="font-medium">{suggestion.mainText}</span>
+                {suggestion.secondaryText ? (
                   <span className="text-muted-foreground block text-[11px]">
-                    {suggestion.cityName}
+                    {suggestion.secondaryText}
                   </span>
-                )}
+                ) : null}
               </button>
             ))}
           </div>

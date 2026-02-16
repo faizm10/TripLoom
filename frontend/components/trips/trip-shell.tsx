@@ -82,7 +82,7 @@ export function TripShell({
   children: React.ReactNode
 }) {
   const pathname = usePathname()
-  const [chatOpen, setChatOpen] = React.useState(true)
+  const [chatOpen, setChatOpen] = React.useState(false)
 
   const pageKey = getPageKey(pathname)
   const header = pageCopy[pageKey] || pageCopy.overview

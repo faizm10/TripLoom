@@ -17,6 +17,14 @@ import {
 
 const STORAGE_KEY = "triploom_trips"
 
+function normalizeTransit(trip: Trip): Trip {
+  const hasRoutes = Array.isArray(trip.transitRoutes)
+  return {
+    ...trip,
+    transitSaved: hasRoutes ? (trip.transitRoutes?.length ?? 0) > 0 : trip.transitSaved,
+  }
+}
+
 function loadTrips(): Trip[] {
   if (typeof window === "undefined") return getTrips()
   const defaults = getTrips()
@@ -27,14 +35,16 @@ function loadTrips(): Trip[] {
       if (Array.isArray(parsed) && parsed.length > 0) {
         const torontoDefault = defaults.find((t) => t.id === "toronto-spring")
         return parsed.map((t) =>
-          t.id === "toronto-spring" && torontoDefault ? torontoDefault : t
+          normalizeTransit(
+            t.id === "toronto-spring" && torontoDefault ? torontoDefault : t
+          )
         )
       }
     }
   } catch {
     // ignore
   }
-  return defaults
+  return defaults.map(normalizeTransit)
 }
 
 function saveTrips(trips: Trip[]) {
@@ -88,9 +98,15 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
   const updateTrip = React.useCallback(
     (id: string, partial: Partial<Trip>) => {
       setTrips((prev) =>
-        prev.map((t) =>
-          t.id === id ? { ...t, ...partial, lastUpdated: new Date().toISOString().slice(0, 10) } : t
-        )
+        prev.map((t) => {
+          if (t.id !== id) return t
+          const merged: Trip = {
+            ...t,
+            ...partial,
+            lastUpdated: new Date().toISOString().slice(0, 10),
+          }
+          return normalizeTransit(merged)
+        })
       )
     },
     []

@@ -28,6 +28,34 @@ export type TripExpense = {
   payerName: string
   splitMode: SplitMode
   splits?: TripExpenseSplit[]
+export type TransitMode =
+  | "subway"
+  | "bus"
+  | "tram"
+  | "rail"
+  | "ferry"
+  | "walk_mix"
+  | "other"
+
+export type TransitRoute = {
+  id: string
+  tripId: string
+  dayIndex: number
+  fromLabel: string
+  toLabel: string
+  fromPlaceId?: string
+  toPlaceId?: string
+  mode: TransitMode
+  durationMinutes: number
+  departureTimeLocal?: string
+  arrivalTimeLocal?: string
+  estimatedCost: number
+  currency: string
+  provider: "google_maps" | "manual"
+  providerRouteRef?: string
+  referenceUrl?: string
+  transfers?: number
+  walkingMinutes?: number
   notes?: string
   createdAt: string
   updatedAt: string
@@ -68,6 +96,7 @@ export type Trip = {
   itineraryDaysPlanned: number
   totalDays: number
   transitSaved: boolean
+  transitRoutes?: TransitRoute[]
   financeSet: boolean
   approvalsPending: number
   budgetTotal: number
@@ -112,6 +141,7 @@ const trips: Trip[] = [
     itineraryDaysPlanned: 0,
     totalDays: 8,
     transitSaved: false,
+    transitRoutes: [],
     financeSet: false,
     approvalsPending: 0,
     budgetTotal: 0,
@@ -133,6 +163,27 @@ const trips: Trip[] = [
     itineraryDaysPlanned: 7,
     totalDays: 9,
     transitSaved: true,
+    transitRoutes: [
+      {
+        id: "tokyo-route-1",
+        tripId: "tokyo-fall",
+        dayIndex: 1,
+        fromLabel: "Shinjuku Station",
+        toLabel: "Senso-ji Temple",
+        mode: "rail",
+        durationMinutes: 34,
+        departureTimeLocal: "2026-10-03T08:30",
+        arrivalTimeLocal: "2026-10-03T09:04",
+        estimatedCost: 2.15,
+        currency: "USD",
+        provider: "manual",
+        transfers: 1,
+        walkingMinutes: 9,
+        notes: "Use Suica card",
+        createdAt: "2026-02-14T09:15:00.000Z",
+        updatedAt: "2026-02-14T09:15:00.000Z",
+      },
+    ],
     financeSet: true,
     approvalsPending: 0,
     budgetTotal: 2940,
@@ -161,6 +212,7 @@ const trips: Trip[] = [
     itineraryDaysPlanned: 1,
     totalDays: 3,
     transitSaved: false,
+    transitRoutes: [],
     financeSet: false,
     approvalsPending: 1,
     budgetTotal: 1320,
@@ -174,6 +226,15 @@ const trips: Trip[] = [
     ],
   },
 ]
+
+export function hasTransitRoutes(trip: Trip): boolean {
+  if (Array.isArray(trip.transitRoutes)) return trip.transitRoutes.length > 0
+  return trip.transitSaved
+}
+
+export function getTripTransitRoutes(trip: Trip): TransitRoute[] {
+  return Array.isArray(trip.transitRoutes) ? trip.transitRoutes : []
+}
 
 export function getTrips(): Trip[] {
   return trips
@@ -520,7 +581,7 @@ export function getNextStep(trip: Trip): {
     }
   }
 
-  if (!trip.transitSaved) {
+  if (!hasTransitRoutes(trip)) {
     return {
       title: "Save transit routes",
       description: "Connect itinerary points with practical transit plans.",
@@ -578,6 +639,8 @@ export function getMissingChecklist(trip: Trip): string[] {
   if (trip.itineraryDaysPlanned === 0) missing.push("Itinerary not started")
   if (!trip.transitSaved) missing.push("Transit routes not saved")
   if (!isFinanceComplete(trip)) missing.push("Finance setup incomplete")
+  if (!hasTransitRoutes(trip)) missing.push("Transit routes not saved")
+  if (!trip.financeSet) missing.push("Finance setup incomplete")
   if (trip.isGroupTrip && trip.approvalsPending > 0) {
     missing.push(`${trip.approvalsPending} approvals pending`)
   }
@@ -621,4 +684,72 @@ export function getTripsByTimeline(
     },
     { future: [], current: [], past: [] }
   )
+}
+
+function setTripTransitRoutes(trip: Trip, nextRoutes: TransitRoute[]): Trip {
+  const now = new Date().toISOString().slice(0, 10)
+  trip.transitRoutes = nextRoutes
+  trip.transitSaved = nextRoutes.length > 0
+  trip.lastUpdated = now
+  return trip
+}
+
+export function getTransitRoutes(tripId: string): TransitRoute[] {
+  const trip = getTripById(tripId)
+  return trip?.transitRoutes ?? []
+}
+
+export function saveTransitRoute(
+  tripId: string,
+  route: TransitRoute
+): TransitRoute[] {
+  const trip = getTripById(tripId)
+  if (!trip) return []
+
+  const nextRoute: TransitRoute = {
+    ...route,
+    tripId,
+    updatedAt: route.updatedAt || new Date().toISOString(),
+    createdAt: route.createdAt || new Date().toISOString(),
+  }
+
+  return setTripTransitRoutes(trip, [...(trip.transitRoutes ?? []), nextRoute])
+    .transitRoutes as TransitRoute[]
+}
+
+export function updateTransitRoute(
+  tripId: string,
+  routeId: string,
+  patch: Partial<TransitRoute>
+): TransitRoute[] {
+  const trip = getTripById(tripId)
+  if (!trip) return []
+
+  const nextRoutes = (trip.transitRoutes ?? []).map((route) =>
+    route.id === routeId
+      ? {
+          ...route,
+          ...patch,
+          tripId,
+          id: route.id,
+          updatedAt: new Date().toISOString(),
+        }
+      : route
+  )
+
+  return setTripTransitRoutes(trip, nextRoutes).transitRoutes as TransitRoute[]
+}
+
+export function deleteTransitRoute(
+  tripId: string,
+  routeId: string
+): TransitRoute[] {
+  const trip = getTripById(tripId)
+  if (!trip) return []
+
+  const nextRoutes = (trip.transitRoutes ?? []).filter(
+    (route) => route.id !== routeId
+  )
+
+  return setTripTransitRoutes(trip, nextRoutes).transitRoutes as TransitRoute[]
 }

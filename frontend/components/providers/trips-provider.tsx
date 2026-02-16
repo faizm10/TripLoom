@@ -4,13 +4,17 @@ import * as React from "react"
 import type {
   CreateTripInput,
   Trip,
+  TripItineraryItem,
   TripExpense,
   TripFinance,
   TripFinanceAutomation,
 } from "@/lib/trips"
 import {
+  coerceTripItineraryForTotalDays as coerceItinerary,
+  computeItineraryDaysPlanned as computeDaysPlanned,
   getFinanceSummary,
   getTripFinance,
+  getTripItineraryItems,
   getTrips,
   isFinanceComplete,
   runFinanceGuardrails,
@@ -34,10 +38,21 @@ function loadTrips(): Trip[] {
     if (raw) {
       const parsed = JSON.parse(raw) as Trip[]
       if (Array.isArray(parsed) && parsed.length > 0) {
-        const torontoDefault = defaults.find((t) => t.id === "toronto-spring")
+        const germanyDefault = defaults.find((t) => t.id === "germany-spring")
+        const tokyoDefault = defaults.find((t) => t.id === "tokyo-fall")
         return parsed.map((t) =>
           normalizeTransit(
-            t.id === "toronto-spring" && torontoDefault ? torontoDefault : t
+            (t.id === "toronto-spring" || t.id === "germany-spring") && germanyDefault
+              ? germanyDefault
+              : t.id === "tokyo-fall" &&
+                  tokyoDefault &&
+                  (!Array.isArray(t.itineraryItems) || t.itineraryItems.length === 0)
+                ? {
+                    ...t,
+                    itineraryItems: tokyoDefault.itineraryItems,
+                    itineraryDaysPlanned: tokyoDefault.itineraryDaysPlanned,
+                  }
+                : t
           )
         )
       }
@@ -63,6 +78,14 @@ type TripsContextValue = {
   createTrip: (input: CreateTripInput) => Trip
   deleteTrip: (id: string) => void
   updateTrip: (id: string, partial: Partial<Trip>) => void
+  setTripItineraryItems: (id: string, items: TripItineraryItem[]) => void
+  addTripItineraryItem: (id: string, item: TripItineraryItem) => void
+  updateTripItineraryItem: (
+    id: string,
+    itemId: string,
+    patch: Partial<TripItineraryItem>
+  ) => void
+  deleteTripItineraryItem: (id: string, itemId: string) => void
   setTripBudget: (id: string, budgetTotal: number, currency: string) => void
   addTripExpense: (id: string, expense: TripExpense) => void
   updateTripExpense: (id: string, expenseId: string, patch: Partial<TripExpense>) => void
@@ -131,6 +154,7 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
       selectedFlights: false,
       selectedHotel: false,
       itineraryDaysPlanned: 0,
+      itineraryItems: [],
       totalDays,
       transitSaved: false,
       transitRoutes: [],
@@ -155,12 +179,101 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
             ...partial,
             lastUpdated: new Date().toISOString().slice(0, 10),
           }
+          if (typeof partial.totalDays === "number" && Array.isArray(t.itineraryItems)) {
+            merged.itineraryItems = coerceItinerary({
+              ...merged,
+              itineraryItems: t.itineraryItems,
+            })
+            merged.itineraryDaysPlanned = computeDaysPlanned(merged.itineraryItems)
+          }
           return normalizeTransit(merged)
         })
       )
     },
     []
   )
+
+  const setTripItineraryItems = React.useCallback((id: string, items: TripItineraryItem[]) => {
+    setTrips((prev) =>
+      prev.map((trip) => {
+        if (trip.id !== id) return trip
+        const normalized = coerceItinerary({ ...trip, itineraryItems: items })
+        return {
+          ...trip,
+          itineraryItems: normalized,
+          itineraryDaysPlanned: computeDaysPlanned(normalized),
+          lastUpdated: new Date().toISOString().slice(0, 10),
+        }
+      })
+    )
+  }, [])
+
+  const addTripItineraryItem = React.useCallback((id: string, item: TripItineraryItem) => {
+    setTrips((prev) =>
+      prev.map((trip) => {
+        if (trip.id !== id) return trip
+        const next = getTripItineraryItems({
+          ...trip,
+          itineraryItems: [...(trip.itineraryItems ?? []), item],
+        })
+        return {
+          ...trip,
+          itineraryItems: next,
+          itineraryDaysPlanned: computeDaysPlanned(next),
+          lastUpdated: new Date().toISOString().slice(0, 10),
+        }
+      })
+    )
+  }, [])
+
+  const updateTripItineraryItem = React.useCallback(
+    (id: string, itemId: string, patch: Partial<TripItineraryItem>) => {
+      setTrips((prev) =>
+        prev.map((trip) => {
+          if (trip.id !== id) return trip
+          const next = getTripItineraryItems({
+            ...trip,
+            itineraryItems: (trip.itineraryItems ?? []).map((item) =>
+              item.id === itemId
+                ? {
+                    ...item,
+                    ...patch,
+                    id: item.id,
+                    tripId: item.tripId,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : item
+            ),
+          })
+          return {
+            ...trip,
+            itineraryItems: next,
+            itineraryDaysPlanned: computeDaysPlanned(next),
+            lastUpdated: new Date().toISOString().slice(0, 10),
+          }
+        })
+      )
+    },
+    []
+  )
+
+  const deleteTripItineraryItem = React.useCallback((id: string, itemId: string) => {
+    setTrips((prev) =>
+      prev.map((trip) => {
+        if (trip.id !== id) return trip
+        const next = getTripItineraryItems({
+          ...trip,
+          itineraryItems: (trip.itineraryItems ?? []).filter((item) => item.id !== itemId),
+        })
+        return {
+          ...trip,
+          itineraryItems: next,
+          itineraryDaysPlanned: computeDaysPlanned(next),
+          lastUpdated: new Date().toISOString().slice(0, 10),
+        }
+      })
+    )
+  }, [])
 
   const deleteTrip = React.useCallback((id: string) => {
     setTrips((prev) => prev.filter((trip) => trip.id !== id))
@@ -338,6 +451,10 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
       createTrip,
       deleteTrip,
       updateTrip,
+      setTripItineraryItems,
+      addTripItineraryItem,
+      updateTripItineraryItem,
+      deleteTripItineraryItem,
       setTripBudget,
       addTripExpense,
       updateTripExpense,
@@ -352,6 +469,10 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
       createTrip,
       deleteTrip,
       updateTrip,
+      setTripItineraryItems,
+      addTripItineraryItem,
+      updateTripItineraryItem,
+      deleteTripItineraryItem,
       setTripBudget,
       addTripExpense,
       updateTripExpense,
@@ -388,6 +509,7 @@ export function useCreateTrip(): (input: CreateTripInput) => Trip {
     selectedFlights: false,
     selectedHotel: false,
     itineraryDaysPlanned: 0,
+    itineraryItems: [],
     totalDays: 1,
     transitSaved: false,
     transitRoutes: [],
@@ -416,6 +538,25 @@ export function useTrip(
 export function useUpdateTrip(): (id: string, partial: Partial<Trip>) => void {
   const ctx = React.useContext(TripsContext)
   return ctx?.updateTrip ?? (() => {})
+}
+
+export function useTripItineraryActions(): {
+  setTripItineraryItems: (id: string, items: TripItineraryItem[]) => void
+  addTripItineraryItem: (id: string, item: TripItineraryItem) => void
+  updateTripItineraryItem: (
+    id: string,
+    itemId: string,
+    patch: Partial<TripItineraryItem>
+  ) => void
+  deleteTripItineraryItem: (id: string, itemId: string) => void
+} {
+  const ctx = React.useContext(TripsContext)
+  return {
+    setTripItineraryItems: ctx?.setTripItineraryItems ?? (() => {}),
+    addTripItineraryItem: ctx?.addTripItineraryItem ?? (() => {}),
+    updateTripItineraryItem: ctx?.updateTripItineraryItem ?? (() => {}),
+    deleteTripItineraryItem: ctx?.deleteTripItineraryItem ?? (() => {}),
+  }
 }
 
 export function useTripFinanceActions(): {

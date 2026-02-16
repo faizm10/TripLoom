@@ -42,6 +42,42 @@ export type TransitMode =
   | "walk_mix"
   | "other"
 
+export type ItineraryTimeBlock = "morning" | "afternoon" | "evening"
+
+export type ItineraryStatus = "planned" | "todo" | "finished"
+
+export type ItineraryCategory =
+  | "outbound_flight"
+  | "inbound_flight"
+  | "commute"
+  | "activities"
+  | "games"
+  | "food"
+  | "sightseeing"
+  | "shopping"
+  | "rest"
+  | "other"
+
+export type TripItineraryItem = {
+  id: string
+  tripId: string
+  dayIndex: number
+  timeBlock: ItineraryTimeBlock
+  status: ItineraryStatus
+  category: ItineraryCategory
+  title: string
+  locationLabel: string
+  placeId?: string
+  lat?: number
+  lng?: number
+  notes?: string
+  startTimeLocal?: string
+  endTimeLocal?: string
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
 export type TransitRoute = {
   id: string
   tripId: string
@@ -100,6 +136,7 @@ export type Trip = {
   selectedHotel: boolean
   itineraryDaysPlanned: number
   totalDays: number
+  itineraryItems?: TripItineraryItem[]
   transitSaved: boolean
   transitRoutes?: TransitRoute[]
   financeSet: boolean
@@ -136,29 +173,330 @@ const DEFAULT_FINANCE_AUTOMATION: TripFinanceAutomation = {
 
 const DEFAULT_FINANCE_CURRENCY = "CAD"
 const HOTEL_ALLOCATOR_NOTE_PREFIX = "[hotel_allocator_v1]"
+const TIME_BLOCK_ORDER: Record<ItineraryTimeBlock, number> = {
+  morning: 1,
+  afternoon: 2,
+  evening: 3,
+}
 
 const trips: Trip[] = [
   {
-    id: "toronto-spring",
-    destination: "Toronto, Canada",
-    startDate: "2026-04-12",
-    endDate: "2026-04-20",
+    id: "germany-spring",
+    destination: "Germany",
+    startDate: "2026-04-24",
+    endDate: "2026-05-04",
     travelers: 1,
     isGroupTrip: false,
     status: "planning",
     lastUpdated: "2026-02-14",
-    progress: 0,
+    progress: 36,
     selectedFlights: false,
     selectedHotel: false,
-    itineraryDaysPlanned: 0,
-    totalDays: 8,
+    itineraryDaysPlanned: 11,
+    itineraryItems: [
+      {
+        id: "germany-itin-1",
+        tripId: "germany-spring",
+        dayIndex: 1,
+        timeBlock: "morning",
+        status: "planned",
+        category: "outbound_flight",
+        title: "Fly Out: Toronto → Berlin",
+        locationLabel: "YYZ to BER",
+        notes: "Arrive Berlin in the morning and check in.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:00:00.000Z",
+        updatedAt: "2026-02-14T08:00:00.000Z",
+      },
+      {
+        id: "germany-itin-2",
+        tripId: "germany-spring",
+        dayIndex: 1,
+        timeBlock: "evening",
+        status: "planned",
+        category: "rest",
+        title: "Berlin Arrival Reset",
+        locationLabel: "Berlin",
+        notes: "Easy evening and overnight stay.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:01:00.000Z",
+        updatedAt: "2026-02-14T08:01:00.000Z",
+      },
+      {
+        id: "germany-itin-3",
+        tripId: "germany-spring",
+        dayIndex: 2,
+        timeBlock: "morning",
+        status: "planned",
+        category: "sightseeing",
+        title: "Berlin Core Sights",
+        locationLabel: "Berlin",
+        notes: "Full day explore with optional soccer game at night.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:02:00.000Z",
+        updatedAt: "2026-02-14T08:02:00.000Z",
+      },
+      {
+        id: "germany-itin-4",
+        tripId: "germany-spring",
+        dayIndex: 3,
+        timeBlock: "morning",
+        status: "planned",
+        category: "activities",
+        title: "Berlin Explore Day 2",
+        locationLabel: "Berlin",
+        notes: "Second full Berlin exploration day.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:03:00.000Z",
+        updatedAt: "2026-02-14T08:03:00.000Z",
+      },
+      {
+        id: "germany-itin-5",
+        tripId: "germany-spring",
+        dayIndex: 4,
+        timeBlock: "morning",
+        status: "planned",
+        category: "commute",
+        title: "Train: Berlin → Dresden (IC 2173)",
+        locationLabel: "Berlin Hbf to Dresden-Neustadt",
+        notes: "Dep 08:26, Arr 10:21, about 2h.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:04:00.000Z",
+        updatedAt: "2026-02-14T08:04:00.000Z",
+      },
+      {
+        id: "germany-itin-6",
+        tripId: "germany-spring",
+        dayIndex: 4,
+        timeBlock: "afternoon",
+        status: "planned",
+        category: "sightseeing",
+        title: "Dresden Midday Walk",
+        locationLabel: "Dresden",
+        notes: "Half-day Dresden explore after arrival.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:05:00.000Z",
+        updatedAt: "2026-02-14T08:05:00.000Z",
+      },
+      {
+        id: "germany-itin-7",
+        tripId: "germany-spring",
+        dayIndex: 4,
+        timeBlock: "evening",
+        status: "planned",
+        category: "food",
+        title: "Dresden Evening Explore",
+        locationLabel: "Dresden Old Town",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:06:00.000Z",
+        updatedAt: "2026-02-14T08:06:00.000Z",
+      },
+      {
+        id: "germany-itin-8",
+        tripId: "germany-spring",
+        dayIndex: 5,
+        timeBlock: "morning",
+        status: "planned",
+        category: "commute",
+        title: "Dresden → Bad Schandau",
+        locationLabel: "Saxon Switzerland",
+        notes: "About 30 min train each way.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:07:00.000Z",
+        updatedAt: "2026-02-14T08:07:00.000Z",
+      },
+      {
+        id: "germany-itin-9",
+        tripId: "germany-spring",
+        dayIndex: 5,
+        timeBlock: "afternoon",
+        status: "planned",
+        category: "activities",
+        title: "Bastei Bridge or Königstein Fortress",
+        locationLabel: "Saxon Switzerland",
+        notes: "Choose one main activity.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:08:00.000Z",
+        updatedAt: "2026-02-14T08:08:00.000Z",
+      },
+      {
+        id: "germany-itin-10",
+        tripId: "germany-spring",
+        dayIndex: 5,
+        timeBlock: "evening",
+        status: "planned",
+        category: "commute",
+        title: "Return to Dresden",
+        locationLabel: "Bad Schandau to Dresden",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:09:00.000Z",
+        updatedAt: "2026-02-14T08:09:00.000Z",
+      },
+      {
+        id: "germany-itin-11",
+        tripId: "germany-spring",
+        dayIndex: 6,
+        timeBlock: "morning",
+        status: "planned",
+        category: "commute",
+        title: "Day Trip: Dresden → Prague",
+        locationLabel: "Flixbus",
+        notes: "About 2h bus each direction.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:10:00.000Z",
+        updatedAt: "2026-02-14T08:10:00.000Z",
+      },
+      {
+        id: "germany-itin-12",
+        tripId: "germany-spring",
+        dayIndex: 6,
+        timeBlock: "afternoon",
+        status: "planned",
+        category: "sightseeing",
+        title: "Prague Highlights",
+        locationLabel: "Prague",
+        notes: "3/4 day coverage target.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:11:00.000Z",
+        updatedAt: "2026-02-14T08:11:00.000Z",
+      },
+      {
+        id: "germany-itin-13",
+        tripId: "germany-spring",
+        dayIndex: 6,
+        timeBlock: "evening",
+        status: "planned",
+        category: "commute",
+        title: "Prague → Dresden Return",
+        locationLabel: "Flixbus",
+        notes: "Check logistics for commute windows.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:12:00.000Z",
+        updatedAt: "2026-02-14T08:12:00.000Z",
+      },
+      {
+        id: "germany-itin-14",
+        tripId: "germany-spring",
+        dayIndex: 7,
+        timeBlock: "morning",
+        status: "planned",
+        category: "commute",
+        title: "Travel: Dresden → Munich",
+        locationLabel: "Rail via Leipzig or direct bus",
+        notes: "Train 4.5-5h or bus 6h30.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:13:00.000Z",
+        updatedAt: "2026-02-14T08:13:00.000Z",
+      },
+      {
+        id: "germany-itin-15",
+        tripId: "germany-spring",
+        dayIndex: 8,
+        timeBlock: "morning",
+        status: "planned",
+        category: "activities",
+        title: "Munich Explore Day",
+        locationLabel: "Munich",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:14:00.000Z",
+        updatedAt: "2026-02-14T08:14:00.000Z",
+      },
+      {
+        id: "germany-itin-16",
+        tripId: "germany-spring",
+        dayIndex: 9,
+        timeBlock: "morning",
+        status: "planned",
+        category: "commute",
+        title: "Rail: Munich → Salzburg (RJX 61)",
+        locationLabel: "München Hbf to Salzburg Hbf",
+        notes: "Dep 07:22, Arr 08:58.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:15:00.000Z",
+        updatedAt: "2026-02-14T08:15:00.000Z",
+      },
+      {
+        id: "germany-itin-17",
+        tripId: "germany-spring",
+        dayIndex: 9,
+        timeBlock: "afternoon",
+        status: "planned",
+        category: "sightseeing",
+        title: "Salzburg Day Trip",
+        locationLabel: "Salzburg",
+        notes: "Approx 3/4 day in city center.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:16:00.000Z",
+        updatedAt: "2026-02-14T08:16:00.000Z",
+      },
+      {
+        id: "germany-itin-18",
+        tripId: "germany-spring",
+        dayIndex: 9,
+        timeBlock: "evening",
+        status: "planned",
+        category: "commute",
+        title: "Rail: Salzburg → Munich (RJX 68)",
+        locationLabel: "Salzburg Hbf to München Hbf",
+        notes: "Dep 21:00, Arr 22:32.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:17:00.000Z",
+        updatedAt: "2026-02-14T08:17:00.000Z",
+      },
+      {
+        id: "germany-itin-19",
+        tripId: "germany-spring",
+        dayIndex: 10,
+        timeBlock: "morning",
+        status: "planned",
+        category: "commute",
+        title: "Travel: Munich → Frankfurt (ICE 726)",
+        locationLabel: "München Hbf to Frankfurt(Main)Hbf",
+        notes: "Dep 07:42, Arr 11:02.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:18:00.000Z",
+        updatedAt: "2026-02-14T08:18:00.000Z",
+      },
+      {
+        id: "germany-itin-20",
+        tripId: "germany-spring",
+        dayIndex: 10,
+        timeBlock: "afternoon",
+        status: "planned",
+        category: "activities",
+        title: "Frankfurt Half-Day Explore",
+        locationLabel: "Frankfurt",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:19:00.000Z",
+        updatedAt: "2026-02-14T08:19:00.000Z",
+      },
+      {
+        id: "germany-itin-21",
+        tripId: "germany-spring",
+        dayIndex: 11,
+        timeBlock: "morning",
+        status: "planned",
+        category: "inbound_flight",
+        title: "Return Flight: Frankfurt → Toronto",
+        locationLabel: "FRA to YYZ",
+        notes: "Arrive Toronto around 2 PM.",
+        sortOrder: 10,
+        createdAt: "2026-02-14T08:20:00.000Z",
+        updatedAt: "2026-02-14T08:20:00.000Z",
+      },
+    ],
+    totalDays: 11,
     transitSaved: false,
     transitRoutes: [],
     financeSet: false,
     approvalsPending: 0,
     budgetTotal: 0,
     perPerson: 0,
-    activities: [],
+    activities: [
+      "Loaded Germany day-by-day itinerary structure",
+      "Added rail and bus commute blocks",
+      "Added hotel and logistics planning checkpoints",
+    ],
   },
   {
     id: "tokyo-fall",
@@ -172,7 +510,129 @@ const trips: Trip[] = [
     progress: 78,
     selectedFlights: true,
     selectedHotel: true,
-    itineraryDaysPlanned: 7,
+    itineraryDaysPlanned: 8,
+    itineraryItems: [
+      {
+        id: "tokyo-itin-1",
+        tripId: "tokyo-fall",
+        dayIndex: 1,
+        timeBlock: "morning",
+        status: "planned",
+        category: "commute",
+        title: "Arrive and Check In",
+        locationLabel: "Shinjuku",
+        startTimeLocal: "2026-10-03T10:00",
+        endTimeLocal: "2026-10-03T12:00",
+        sortOrder: 10,
+        createdAt: "2026-02-14T09:20:00.000Z",
+        updatedAt: "2026-02-14T09:20:00.000Z",
+      },
+      {
+        id: "tokyo-itin-2",
+        tripId: "tokyo-fall",
+        dayIndex: 2,
+        timeBlock: "morning",
+        status: "todo",
+        category: "sightseeing",
+        title: "Senso-ji and Nakamise",
+        locationLabel: "Asakusa",
+        startTimeLocal: "2026-10-04T09:00",
+        endTimeLocal: "2026-10-04T12:00",
+        sortOrder: 10,
+        createdAt: "2026-02-14T09:21:00.000Z",
+        updatedAt: "2026-02-14T09:21:00.000Z",
+      },
+      {
+        id: "tokyo-itin-3",
+        tripId: "tokyo-fall",
+        dayIndex: 3,
+        timeBlock: "afternoon",
+        status: "planned",
+        category: "activities",
+        title: "Meiji Shrine + Yoyogi",
+        locationLabel: "Harajuku",
+        startTimeLocal: "2026-10-05T13:00",
+        endTimeLocal: "2026-10-05T16:00",
+        sortOrder: 10,
+        createdAt: "2026-02-14T09:22:00.000Z",
+        updatedAt: "2026-02-14T09:22:00.000Z",
+      },
+      {
+        id: "tokyo-itin-4",
+        tripId: "tokyo-fall",
+        dayIndex: 4,
+        timeBlock: "evening",
+        status: "todo",
+        category: "food",
+        title: "Shibuya Crossing + Dinner",
+        locationLabel: "Shibuya",
+        startTimeLocal: "2026-10-06T18:00",
+        endTimeLocal: "2026-10-06T21:00",
+        sortOrder: 10,
+        createdAt: "2026-02-14T09:23:00.000Z",
+        updatedAt: "2026-02-14T09:23:00.000Z",
+      },
+      {
+        id: "tokyo-itin-5",
+        tripId: "tokyo-fall",
+        dayIndex: 5,
+        timeBlock: "morning",
+        status: "planned",
+        category: "food",
+        title: "Tsukiji Outer Market",
+        locationLabel: "Chuo City",
+        startTimeLocal: "2026-10-07T08:30",
+        endTimeLocal: "2026-10-07T10:30",
+        sortOrder: 10,
+        createdAt: "2026-02-14T09:24:00.000Z",
+        updatedAt: "2026-02-14T09:24:00.000Z",
+      },
+      {
+        id: "tokyo-itin-6",
+        tripId: "tokyo-fall",
+        dayIndex: 6,
+        timeBlock: "afternoon",
+        status: "finished",
+        category: "activities",
+        title: "TeamLab Planets",
+        locationLabel: "Toyosu",
+        startTimeLocal: "2026-10-08T14:00",
+        endTimeLocal: "2026-10-08T16:00",
+        sortOrder: 10,
+        createdAt: "2026-02-14T09:25:00.000Z",
+        updatedAt: "2026-02-14T09:25:00.000Z",
+      },
+      {
+        id: "tokyo-itin-7",
+        tripId: "tokyo-fall",
+        dayIndex: 7,
+        timeBlock: "morning",
+        status: "planned",
+        category: "sightseeing",
+        title: "Ueno Park + Museums",
+        locationLabel: "Ueno",
+        startTimeLocal: "2026-10-09T09:30",
+        endTimeLocal: "2026-10-09T13:00",
+        sortOrder: 10,
+        createdAt: "2026-02-14T09:26:00.000Z",
+        updatedAt: "2026-02-14T09:26:00.000Z",
+      },
+      {
+        id: "tokyo-itin-8",
+        tripId: "tokyo-fall",
+        dayIndex: 8,
+        timeBlock: "evening",
+        status: "todo",
+        category: "games",
+        title: "Odaiba Night Walk",
+        locationLabel: "Odaiba",
+        startTimeLocal: "2026-10-10T18:30",
+        endTimeLocal: "2026-10-10T21:00",
+        sortOrder: 10,
+        createdAt: "2026-02-14T09:27:00.000Z",
+        updatedAt: "2026-02-14T09:27:00.000Z",
+      },
+    ],
     totalDays: 9,
     transitSaved: true,
     transitRoutes: [
@@ -222,6 +682,7 @@ const trips: Trip[] = [
     selectedFlights: true,
     selectedHotel: true,
     itineraryDaysPlanned: 1,
+    itineraryItems: [],
     totalDays: 3,
     transitSaved: false,
     transitRoutes: [],
@@ -248,6 +709,162 @@ export function getTripTransitRoutes(trip: Trip): TransitRoute[] {
   return Array.isArray(trip.transitRoutes) ? trip.transitRoutes : []
 }
 
+function isValidTimeBlock(value: unknown): value is ItineraryTimeBlock {
+  return value === "morning" || value === "afternoon" || value === "evening"
+}
+
+function isValidStatus(value: unknown): value is ItineraryStatus {
+  return value === "planned" || value === "todo" || value === "finished"
+}
+
+function sanitizeItineraryItem(
+  trip: Trip,
+  raw: Partial<TripItineraryItem>
+): TripItineraryItem | null {
+  if (!raw.id) return null
+  if (typeof raw.title !== "string" || !raw.title.trim()) return null
+  if (typeof raw.locationLabel !== "string" || !raw.locationLabel.trim()) return null
+  const dayIndex = Math.floor(Number(raw.dayIndex))
+  if (!Number.isFinite(dayIndex) || dayIndex < 1 || dayIndex > Math.max(1, trip.totalDays)) {
+    return null
+  }
+  if (!isValidTimeBlock(raw.timeBlock)) return null
+  if (!isValidStatus(raw.status)) return null
+  const category: ItineraryCategory =
+    raw.category === "outbound_flight" ||
+    raw.category === "inbound_flight" ||
+    raw.category === "commute" ||
+    raw.category === "activities" ||
+    raw.category === "games" ||
+    raw.category === "food" ||
+    raw.category === "sightseeing" ||
+    raw.category === "shopping" ||
+    raw.category === "rest" ||
+    raw.category === "other"
+      ? raw.category
+      : "activities"
+
+  return {
+    id: raw.id,
+    tripId: trip.id,
+    dayIndex,
+    timeBlock: raw.timeBlock,
+    status: raw.status,
+    category,
+    title: raw.title.trim(),
+    locationLabel: raw.locationLabel.trim(),
+    placeId: raw.placeId?.trim() || undefined,
+    lat: typeof raw.lat === "number" && Number.isFinite(raw.lat) ? raw.lat : undefined,
+    lng: typeof raw.lng === "number" && Number.isFinite(raw.lng) ? raw.lng : undefined,
+    notes: raw.notes?.trim() || undefined,
+    startTimeLocal: raw.startTimeLocal || undefined,
+    endTimeLocal: raw.endTimeLocal || undefined,
+    sortOrder: Number.isFinite(raw.sortOrder) ? Number(raw.sortOrder) : 0,
+    createdAt: raw.createdAt || new Date().toISOString(),
+    updatedAt: raw.updatedAt || new Date().toISOString(),
+  }
+}
+
+function itinerarySort(a: TripItineraryItem, b: TripItineraryItem): number {
+  if (a.dayIndex !== b.dayIndex) return a.dayIndex - b.dayIndex
+  const blockA = TIME_BLOCK_ORDER[a.timeBlock] ?? 99
+  const blockB = TIME_BLOCK_ORDER[b.timeBlock] ?? 99
+  if (blockA !== blockB) return blockA - blockB
+  if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
+  return a.createdAt.localeCompare(b.createdAt)
+}
+
+export function normalizeSortOrder(items: TripItineraryItem[]): TripItineraryItem[] {
+  const buckets = new Map<string, TripItineraryItem[]>()
+  for (const item of items) {
+    const key = `${item.dayIndex}-${item.timeBlock}`
+    const existing = buckets.get(key) ?? []
+    existing.push(item)
+    buckets.set(key, existing)
+  }
+
+  const normalized: TripItineraryItem[] = []
+  for (const group of buckets.values()) {
+    group
+      .slice()
+      .sort((a, b) => {
+        if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder
+        return a.createdAt.localeCompare(b.createdAt)
+      })
+      .forEach((item, index) => {
+        normalized.push({
+          ...item,
+          sortOrder: (index + 1) * 10,
+        })
+      })
+  }
+
+  return normalized.sort(itinerarySort)
+}
+
+export function getTripItineraryItems(trip: Trip): TripItineraryItem[] {
+  if (!Array.isArray(trip.itineraryItems)) return []
+  const normalized = trip.itineraryItems
+    .map((raw) => sanitizeItineraryItem(trip, raw))
+    .filter((item): item is TripItineraryItem => Boolean(item))
+  return normalizeSortOrder(normalized)
+}
+
+export function computeItineraryDaysPlanned(items: TripItineraryItem[]): number {
+  return new Set(items.map((item) => item.dayIndex)).size
+}
+
+export function getTripItineraryDaysPlanned(trip: Trip): number {
+  const items = getTripItineraryItems(trip)
+  if (items.length === 0) return Math.max(0, Math.floor(trip.itineraryDaysPlanned || 0))
+  return computeItineraryDaysPlanned(items)
+}
+
+export function validateItineraryItemDraft(
+  draft: Pick<TripItineraryItem, "title" | "locationLabel" | "dayIndex">,
+  totalDays: number
+): string | null {
+  if (!draft.title.trim()) return "Title is required."
+  if (!draft.locationLabel.trim()) return "Location is required."
+  if (draft.dayIndex < 1 || draft.dayIndex > Math.max(1, totalDays)) {
+    return "Day is out of range."
+  }
+  return null
+}
+
+export function groupItineraryByDayAndBlock(
+  items: TripItineraryItem[],
+  totalDays: number
+): Record<number, Record<ItineraryTimeBlock, TripItineraryItem[]>> {
+  const grouped: Record<number, Record<ItineraryTimeBlock, TripItineraryItem[]>> = {}
+  for (let day = 1; day <= Math.max(1, totalDays); day++) {
+    grouped[day] = { morning: [], afternoon: [], evening: [] }
+  }
+
+  for (const item of items) {
+    if (!grouped[item.dayIndex]) continue
+    grouped[item.dayIndex][item.timeBlock].push(item)
+  }
+
+  for (const day of Object.keys(grouped)) {
+    const dayNum = Number(day)
+    grouped[dayNum].morning.sort(itinerarySort)
+    grouped[dayNum].afternoon.sort(itinerarySort)
+    grouped[dayNum].evening.sort(itinerarySort)
+  }
+
+  return grouped
+}
+
+export function coerceTripItineraryForTotalDays(trip: Trip): TripItineraryItem[] {
+  const clamped = getTripItineraryItems(trip).map((item) => ({
+    ...item,
+    dayIndex: Math.min(Math.max(1, item.dayIndex), Math.max(1, trip.totalDays)),
+    updatedAt: new Date().toISOString(),
+  }))
+  return normalizeSortOrder(clamped)
+}
+
 export function getTrips(): Trip[] {
   return trips
 }
@@ -267,6 +884,7 @@ export function createFallbackTrip(tripId: string): Trip {
     selectedFlights: false,
     selectedHotel: false,
     itineraryDaysPlanned: 0,
+    itineraryItems: [],
     totalDays: 7,
     transitSaved: false,
     transitRoutes: [],
@@ -606,7 +1224,7 @@ export function getNextStep(trip: Trip): {
     }
   }
 
-  if (trip.itineraryDaysPlanned === 0) {
+  if (getTripItineraryDaysPlanned(trip) === 0) {
     return {
       title: "Auto-fill your itinerary",
       description: "Generate a day-by-day starter plan and refine it quickly.",
@@ -674,7 +1292,7 @@ export function getMissingChecklist(trip: Trip): string[] {
   const missing: string[] = []
   if (!trip.selectedFlights) missing.push("Flights not selected")
   if (!trip.selectedHotel) missing.push("Hotel not selected")
-  if (trip.itineraryDaysPlanned === 0) missing.push("Itinerary not started")
+  if (getTripItineraryDaysPlanned(trip) === 0) missing.push("Itinerary not started")
   if (!hasTransitRoutes(trip)) missing.push("Transit routes not saved")
   if (!isFinanceComplete(trip)) missing.push("Finance setup incomplete")
   if (trip.isGroupTrip && trip.approvalsPending > 0) {
@@ -684,11 +1302,30 @@ export function getMissingChecklist(trip: Trip): string[] {
 }
 
 export function getDateRangeLabel(trip: Trip): string {
-  return `${trip.startDate} to ${trip.endDate}`
+  return `${formatHumanDate(trip.startDate)} to ${formatHumanDate(trip.endDate)}`
 }
 
 function parseDateUtc(date: string): Date {
   return new Date(`${date}T00:00:00.000Z`)
+}
+
+function getOrdinalSuffix(day: number): string {
+  const mod10 = day % 10
+  const mod100 = day % 100
+  if (mod100 >= 11 && mod100 <= 13) return "th"
+  if (mod10 === 1) return "st"
+  if (mod10 === 2) return "nd"
+  if (mod10 === 3) return "rd"
+  return "th"
+}
+
+function formatHumanDate(isoDate: string): string {
+  const parsed = parseDateUtc(isoDate)
+  if (Number.isNaN(parsed.getTime())) return isoDate
+  const month = parsed.toLocaleString("en-US", { month: "short", timeZone: "UTC" })
+  const day = parsed.getUTCDate()
+  const year = parsed.getUTCFullYear()
+  return `${month} ${day}${getOrdinalSuffix(day)} ${year}`
 }
 
 function startOfUtcDay(date: Date): Date {

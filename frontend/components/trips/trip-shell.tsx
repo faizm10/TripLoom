@@ -3,10 +3,11 @@
 import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react"
+import { LogOutIcon, PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react"
 
 import { tripNavItems } from "@/components/trips/nav"
 import { TripAiPanel } from "@/components/trips/trip-ai-panel"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import {
   Sidebar,
@@ -130,9 +131,27 @@ export function TripShell({
         </SidebarContent>
 
         <SidebarFooter>
-          <Button asChild variant="outline" size="sm" className="rounded-none">
-            <Link href="/dashboard">Back to All Trips</Link>
-          </Button>
+          <div className="space-y-2">
+            <div className="border p-2 text-xs">
+              <div className="flex items-center gap-2">
+                <Avatar className="size-7 rounded-none">
+                  <AvatarFallback className="rounded-none text-[10px]">FM</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <p className="truncate font-medium">Faiz Mustansar</p>
+                  <p className="text-muted-foreground truncate">faiz@triploom.com</p>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" className="mt-2 w-full rounded-none">
+                <LogOutIcon />
+                Sign out
+              </Button>
+            </div>
+
+            <Button asChild variant="outline" size="sm" className="w-full rounded-none">
+              <Link href="/dashboard">Back to All Trips</Link>
+            </Button>
+          </div>
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>

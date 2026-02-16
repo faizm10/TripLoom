@@ -3,13 +3,16 @@
 import {
   CompassIcon,
   HotelIcon,
+  LogOutIcon,
   PlaneIcon,
   Settings2Icon,
   TrainFrontIcon,
   UserRoundPlusIcon,
 } from "lucide-react"
 
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import {
   Sidebar,
   SidebarContent,
@@ -85,9 +88,27 @@ export function DashboardSidebar({
       </SidebarContent>
 
       <SidebarFooter>
-        <div className="border p-2 text-xs">
-          <p className="font-medium">Current Trip</p>
-          <p className="text-muted-foreground mt-1">Toronto • 8 Days</p>
+        <div className="space-y-2">
+          <div className="border p-2 text-xs">
+            <p className="font-medium">Current Trip</p>
+            <p className="text-muted-foreground mt-1">Toronto • 8 Days</p>
+          </div>
+
+          <div className="border p-2 text-xs">
+            <div className="flex items-center gap-2">
+              <Avatar className="size-7 rounded-none">
+                <AvatarFallback className="rounded-none text-[10px]">FM</AvatarFallback>
+              </Avatar>
+              <div className="min-w-0">
+                <p className="truncate font-medium">Faiz Mustansar</p>
+                <p className="text-muted-foreground truncate">faiz@triploom.com</p>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" className="mt-2 w-full rounded-none">
+              <LogOutIcon />
+              Sign out
+            </Button>
+          </div>
         </div>
       </SidebarFooter>
       <SidebarRail />

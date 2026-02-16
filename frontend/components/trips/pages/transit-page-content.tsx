@@ -280,8 +280,8 @@ function parseRoutePairsFromText(text: string): Array<{ fromLabel: string; toLab
 function buildDirectionsUrl(
   fromLabel: string,
   toLabel: string,
-  departureTimeLocal?: string,
-  arrivalTimeLocal?: string
+  _departureTimeLocal?: string,
+  _arrivalTimeLocal?: string
 ): string {
   const params = new URLSearchParams({
     api: "1",
@@ -289,15 +289,6 @@ function buildDirectionsUrl(
     destination: toLabel,
     travelmode: "transit",
   })
-
-  const departure = departureTimeLocal ? new Date(departureTimeLocal) : null
-  const arrival = arrivalTimeLocal ? new Date(arrivalTimeLocal) : null
-
-  if (arrival && !Number.isNaN(arrival.getTime())) {
-    params.set("arrival_time", String(Math.floor(arrival.getTime() / 1000)))
-  } else if (departure && !Number.isNaN(departure.getTime())) {
-    params.set("departure_time", String(Math.floor(departure.getTime() / 1000)))
-  }
 
   return `https://www.google.com/maps/dir/?${params.toString()}`
 }
@@ -313,17 +304,6 @@ function buildEmbedMapUrl(preview: MapPreview | null): string | null {
     destination: preview.toLabel,
     mode: "transit",
   })
-
-  const departure = preview.departureTimeLocal
-    ? new Date(preview.departureTimeLocal)
-    : null
-  const arrival = preview.arrivalTimeLocal ? new Date(preview.arrivalTimeLocal) : null
-
-  if (arrival && !Number.isNaN(arrival.getTime())) {
-    params.set("arrival_time", String(Math.floor(arrival.getTime() / 1000)))
-  } else if (departure && !Number.isNaN(departure.getTime())) {
-    params.set("departure_time", String(Math.floor(departure.getTime() / 1000)))
-  }
 
   return `https://www.google.com/maps/embed/v1/directions?${params.toString()}`
 }

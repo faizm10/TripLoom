@@ -1,9 +1,13 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
+import { toast } from "sonner"
 
+import { useCreateTrip } from "@/components/providers/trips-provider"
 import { cn } from "@/lib/utils"
 import {
+  clearNewTripDraft,
   loadNewTripDraft,
   saveNewTripDraft,
   type NewTripDraft,
@@ -12,6 +16,8 @@ import { Button } from "@/components/ui/button"
 import { DestinationSearch } from "@/components/dashboard-home/destination-search"
 
 export function NewTripCard() {
+  const router = useRouter()
+  const createTrip = useCreateTrip()
   const [draft, setDraft] = useState<NewTripDraft>({
     destination: "",
     dateMode: "exact",
@@ -28,6 +34,36 @@ export function NewTripCard() {
     const next = { ...draft, ...partial }
     setDraft(next)
     saveNewTripDraft(next)
+  }
+
+  const handleCreateTrip = () => {
+    const destination = draft.destination.trim()
+    if (!destination) {
+      toast.error("Enter a destination first.")
+      return
+    }
+
+    const slug = destination
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)/g, "")
+    const id = `${slug || "trip"}-${Date.now().toString(36)}`
+
+    const trip = createTrip({
+      id,
+      destination,
+      dateMode: draft.dateMode,
+      travelers: draft.travelers,
+    })
+
+    clearNewTripDraft()
+    setDraft({
+      destination: "",
+      dateMode: "exact",
+      travelers: "solo",
+    })
+    toast.success("Trip created.")
+    router.push(`/trips/${trip.id}`)
   }
 
   return (
@@ -100,7 +136,7 @@ export function NewTripCard() {
       </div>
 
       <div className="mt-4">
-        <Button>Create Trip</Button>
+        <Button onClick={handleCreateTrip}>Create Trip</Button>
       </div>
     </section>
   )

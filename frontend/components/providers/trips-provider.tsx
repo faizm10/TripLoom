@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import type {
+  CreateTripInput,
   Trip,
   TripExpense,
   TripFinance,
@@ -59,6 +60,8 @@ function saveTrips(trips: Trip[]) {
 type TripsContextValue = {
   trips: Trip[]
   getTripById: (id: string) => Trip | undefined
+  createTrip: (input: CreateTripInput) => Trip
+  deleteTrip: (id: string) => void
   updateTrip: (id: string, partial: Partial<Trip>) => void
   setTripBudget: (id: string, budgetTotal: number, currency: string) => void
   addTripExpense: (id: string, expense: TripExpense) => void
@@ -95,6 +98,53 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
     [trips]
   )
 
+  const createTrip = React.useCallback((input: CreateTripInput): Trip => {
+    const today = new Date()
+    const start = new Date(
+      Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
+    )
+
+    if (input.dateMode === "weekend") {
+      const day = start.getUTCDay()
+      const offset = ((6 - day) + 7) % 7 || 7
+      start.setUTCDate(start.getUTCDate() + offset)
+    } else if (input.dateMode === "exact") {
+      start.setUTCDate(start.getUTCDate() + 30)
+    } else {
+      start.setUTCDate(start.getUTCDate() + 45)
+    }
+
+    const totalDays = input.dateMode === "weekend" ? 3 : input.dateMode === "flexible" ? 10 : 7
+    const end = new Date(start)
+    end.setUTCDate(start.getUTCDate() + Math.max(1, totalDays - 1))
+
+    const next: Trip = {
+      id: input.id,
+      destination: input.destination,
+      startDate: start.toISOString().slice(0, 10),
+      endDate: end.toISOString().slice(0, 10),
+      travelers: input.travelers === "group" ? 2 : 1,
+      isGroupTrip: input.travelers === "group",
+      status: "planning",
+      lastUpdated: new Date().toISOString().slice(0, 10),
+      progress: 0,
+      selectedFlights: false,
+      selectedHotel: false,
+      itineraryDaysPlanned: 0,
+      totalDays,
+      transitSaved: false,
+      transitRoutes: [],
+      financeSet: false,
+      approvalsPending: 0,
+      budgetTotal: 0,
+      perPerson: 0,
+      activities: ["Trip created"],
+    }
+
+    setTrips((prev) => [next, ...prev.filter((trip) => trip.id !== next.id)])
+    return next
+  }, [])
+
   const updateTrip = React.useCallback(
     (id: string, partial: Partial<Trip>) => {
       setTrips((prev) =>
@@ -111,6 +161,10 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
     },
     []
   )
+
+  const deleteTrip = React.useCallback((id: string) => {
+    setTrips((prev) => prev.filter((trip) => trip.id !== id))
+  }, [])
 
   const withFinanceMirrors = React.useCallback((trip: Trip, finance: TripFinance): Trip => {
     const summary = getFinanceSummary({ ...trip, finance })
@@ -281,6 +335,8 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
     () => ({
       trips,
       getTripById,
+      createTrip,
+      deleteTrip,
       updateTrip,
       setTripBudget,
       addTripExpense,
@@ -293,6 +349,8 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
     [
       trips,
       getTripById,
+      createTrip,
+      deleteTrip,
       updateTrip,
       setTripBudget,
       addTripExpense,
@@ -313,6 +371,37 @@ export function useTrips(): Trip[] {
   const ctx = React.useContext(TripsContext)
   if (!ctx) return getTrips()
   return ctx.trips
+}
+
+export function useCreateTrip(): (input: CreateTripInput) => Trip {
+  const ctx = React.useContext(TripsContext)
+  return ctx?.createTrip ?? ((input: CreateTripInput) => ({
+    id: input.id,
+    destination: input.destination,
+    startDate: new Date().toISOString().slice(0, 10),
+    endDate: new Date().toISOString().slice(0, 10),
+    travelers: input.travelers === "group" ? 2 : 1,
+    isGroupTrip: input.travelers === "group",
+    status: "planning",
+    lastUpdated: new Date().toISOString().slice(0, 10),
+    progress: 0,
+    selectedFlights: false,
+    selectedHotel: false,
+    itineraryDaysPlanned: 0,
+    totalDays: 1,
+    transitSaved: false,
+    transitRoutes: [],
+    financeSet: false,
+    approvalsPending: 0,
+    budgetTotal: 0,
+    perPerson: 0,
+    activities: [],
+  }))
+}
+
+export function useDeleteTrip(): (id: string) => void {
+  const ctx = React.useContext(TripsContext)
+  return ctx?.deleteTrip ?? (() => {})
 }
 
 export function useTrip(

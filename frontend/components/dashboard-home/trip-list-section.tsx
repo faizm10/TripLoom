@@ -1,11 +1,23 @@
-import Link from "next/link"
+"use client"
 
+import Link from "next/link"
+import { Trash2Icon } from "lucide-react"
+
+import { useDeleteTrip } from "@/components/providers/trips-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { Trip } from "@/lib/trips"
 import { getDateRangeLabel, getTripStatusLabel } from "@/lib/trips"
 
 export function TripListSection({ trips }: { trips: Trip[] }) {
+  const deleteTrip = useDeleteTrip()
+
+  const handleDelete = (trip: Trip) => {
+    const ok = window.confirm(`Delete trip "${trip.destination}"?`)
+    if (!ok) return
+    deleteTrip(trip.id)
+  }
+
   return (
     <section className="rounded-sm border bg-card p-5 sm:p-6">
       <div className="flex items-center justify-between gap-3">
@@ -37,16 +49,25 @@ export function TripListSection({ trips }: { trips: Trip[] }) {
               Last updated: {trip.lastUpdated}
             </p>
 
-            <div className="mt-3 flex gap-2">
-              <Button asChild variant="outline" size="sm">
-                <Link href={`/trips/${trip.id}`}>Open</Link>
-              </Button>
-              <Button asChild variant="outline" size="sm">
-                <Link href={`/trips/${trip.id}/itinerary`}>Itinerary</Link>
-              </Button>
-            </div>
-          </article>
-        ))}
+              <div className="mt-3 flex gap-2">
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/trips/${trip.id}`}>Open</Link>
+                </Button>
+                <Button asChild variant="outline" size="sm">
+                  <Link href={`/trips/${trip.id}/itinerary`}>Itinerary</Link>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-red-700"
+                  onClick={() => handleDelete(trip)}
+                >
+                  <Trash2Icon />
+                  Delete
+                </Button>
+              </div>
+            </article>
+          ))}
       </div>
     </section>
   )

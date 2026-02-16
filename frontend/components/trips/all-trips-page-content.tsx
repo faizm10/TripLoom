@@ -1,5 +1,9 @@
-import Link from "next/link"
+"use client"
 
+import Link from "next/link"
+import { Trash2Icon } from "lucide-react"
+
+import { useDeleteTrip } from "@/components/providers/trips-provider"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { Trip } from "@/lib/trips"
@@ -9,10 +13,12 @@ function TripGroupSection({
   title,
   trips,
   emptyText,
+  onDeleteTrip,
 }: {
   title: string
   trips: Trip[]
   emptyText: string
+  onDeleteTrip: (trip: Trip) => void
 }) {
   return (
     <section className="rounded-sm border bg-card p-5 sm:p-6">
@@ -45,6 +51,15 @@ function TripGroupSection({
                 <Button asChild variant="outline" size="sm">
                   <Link href={`/trips/${trip.id}/itinerary`}>Itinerary</Link>
                 </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-red-700"
+                  onClick={() => onDeleteTrip(trip)}
+                >
+                  <Trash2Icon />
+                  Delete
+                </Button>
               </div>
             </article>
           ))}
@@ -63,6 +78,13 @@ export function AllTripsPageContent({
   currentTrips: Trip[]
   pastTrips: Trip[]
 }) {
+  const deleteTrip = useDeleteTrip()
+  const handleDeleteTrip = (trip: Trip) => {
+    const ok = window.confirm(`Delete trip "${trip.destination}"?`)
+    if (!ok) return
+    deleteTrip(trip.id)
+  }
+
   return (
     <main className="mx-auto min-h-screen w-full max-w-6xl px-6 py-8 sm:px-10 sm:py-10">
       <div className="mb-4 rounded-sm border bg-card p-5 sm:p-6">
@@ -82,16 +104,19 @@ export function AllTripsPageContent({
           title="Future Trips"
           trips={futureTrips}
           emptyText="No future trips yet."
+          onDeleteTrip={handleDeleteTrip}
         />
         <TripGroupSection
           title="Current Trips"
           trips={currentTrips}
           emptyText="No trips are currently in progress."
+          onDeleteTrip={handleDeleteTrip}
         />
         <TripGroupSection
           title="Past Trips"
           trips={pastTrips}
           emptyText="No past trips yet."
+          onDeleteTrip={handleDeleteTrip}
         />
       </div>
     </main>

@@ -119,6 +119,13 @@ export type TripBuckets = {
   past: Trip[]
 }
 
+export type CreateTripInput = {
+  id: string
+  destination: string
+  dateMode: "exact" | "weekend" | "flexible"
+  travelers: "solo" | "group"
+}
+
 const DEFAULT_FINANCE_AUTOMATION: TripFinanceAutomation = {
   enabled: false,
   warnAtPercent: 90,
@@ -245,8 +252,34 @@ export function getTrips(): Trip[] {
   return trips
 }
 
+export function createFallbackTrip(tripId: string): Trip {
+  const safeId = tripId || "new-trip"
+  return {
+    id: safeId,
+    destination: "New Trip",
+    startDate: "2026-04-01",
+    endDate: "2026-04-08",
+    travelers: 1,
+    isGroupTrip: false,
+    status: "planning",
+    lastUpdated: new Date().toISOString().slice(0, 10),
+    progress: 0,
+    selectedFlights: false,
+    selectedHotel: false,
+    itineraryDaysPlanned: 0,
+    totalDays: 7,
+    transitSaved: false,
+    transitRoutes: [],
+    financeSet: false,
+    approvalsPending: 0,
+    budgetTotal: 0,
+    perPerson: 0,
+    activities: [],
+  }
+}
+
 export function getTripById(tripId: string): Trip | undefined {
-  return trips.find((trip) => trip.id === tripId)
+  return trips.find((trip) => trip.id === tripId) ?? createFallbackTrip(tripId)
 }
 
 export function getTripStatusLabel(status: TripStatus): string {
@@ -642,10 +675,8 @@ export function getMissingChecklist(trip: Trip): string[] {
   if (!trip.selectedFlights) missing.push("Flights not selected")
   if (!trip.selectedHotel) missing.push("Hotel not selected")
   if (trip.itineraryDaysPlanned === 0) missing.push("Itinerary not started")
-  if (!trip.transitSaved) missing.push("Transit routes not saved")
-  if (!isFinanceComplete(trip)) missing.push("Finance setup incomplete")
   if (!hasTransitRoutes(trip)) missing.push("Transit routes not saved")
-  if (!trip.financeSet) missing.push("Finance setup incomplete")
+  if (!isFinanceComplete(trip)) missing.push("Finance setup incomplete")
   if (trip.isGroupTrip && trip.approvalsPending > 0) {
     missing.push(`${trip.approvalsPending} approvals pending`)
   }

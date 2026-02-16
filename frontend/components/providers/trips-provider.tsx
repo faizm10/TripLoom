@@ -1,8 +1,19 @@
 "use client"
 
 import * as React from "react"
-import type { Trip } from "@/lib/trips"
-import { getTrips } from "@/lib/trips"
+import type {
+  Trip,
+  TripExpense,
+  TripFinance,
+  TripFinanceAutomation,
+} from "@/lib/trips"
+import {
+  getFinanceSummary,
+  getTripFinance,
+  getTrips,
+  isFinanceComplete,
+  runFinanceGuardrails,
+} from "@/lib/trips"
 
 const STORAGE_KEY = "triploom_trips"
 
@@ -39,6 +50,19 @@ type TripsContextValue = {
   trips: Trip[]
   getTripById: (id: string) => Trip | undefined
   updateTrip: (id: string, partial: Partial<Trip>) => void
+  setTripBudget: (id: string, budgetTotal: number, currency: string) => void
+  addTripExpense: (id: string, expense: TripExpense) => void
+  updateTripExpense: (id: string, expenseId: string, patch: Partial<TripExpense>) => void
+  deleteTripExpense: (id: string, expenseId: string) => void
+  updateFinanceAutomation: (
+    id: string,
+    patch: Partial<TripFinanceAutomation>
+  ) => void
+  updateFinanceSettings: (
+    id: string,
+    patch: Partial<Pick<TripFinance, "currency" | "groupModeEnabled" | "groupSize">>
+  ) => void
+  runFinanceAutomationCheck: (id: string) => void
 }
 
 const TripsContext = React.createContext<TripsContextValue | null>(null)
@@ -70,9 +94,183 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
     []
   )
 
+  const withFinanceMirrors = React.useCallback((trip: Trip, finance: TripFinance): Trip => {
+    const summary = getFinanceSummary({ ...trip, finance })
+    return {
+      ...trip,
+      finance,
+      budgetTotal: finance.budgetTotal,
+      perPerson: summary.perPersonEstimate,
+      financeSet: isFinanceComplete({ ...trip, finance }),
+    }
+  }, [])
+
+  const maybeRunFinanceAutomation = React.useCallback((trip: Trip, finance: TripFinance): TripFinance => {
+    if (!finance.automation.enabled) return finance
+    const guardrail = runFinanceGuardrails({ ...trip, finance })
+    return {
+      ...finance,
+      automation: {
+        ...finance.automation,
+        lastRunAt: new Date().toISOString(),
+        lastStatus: guardrail.status,
+      },
+    }
+  }, [])
+
+  const updateTripFinance = React.useCallback(
+    (
+      id: string,
+      updater: (trip: Trip, current: TripFinance) => TripFinance,
+      options?: { runAutomation?: boolean }
+    ) => {
+      const shouldRunAutomation = options?.runAutomation ?? true
+      setTrips((prev) =>
+        prev.map((trip) => {
+          if (trip.id !== id) return trip
+          const current = getTripFinance(trip)
+          let nextFinance = updater(trip, current)
+          if (shouldRunAutomation) {
+            nextFinance = maybeRunFinanceAutomation(trip, nextFinance)
+          }
+          const mirrored = withFinanceMirrors(trip, nextFinance)
+          return {
+            ...mirrored,
+            lastUpdated: new Date().toISOString().slice(0, 10),
+          }
+        })
+      )
+    },
+    [maybeRunFinanceAutomation, withFinanceMirrors]
+  )
+
+  const setTripBudget = React.useCallback(
+    (id: string, budgetTotal: number, currency: string) => {
+      updateTripFinance(id, (_trip, finance) => ({
+        ...finance,
+        budgetTotal: Math.max(0, budgetTotal),
+        currency: currency || "CAD",
+      }))
+    },
+    [updateTripFinance]
+  )
+
+  const addTripExpense = React.useCallback(
+    (id: string, expense: TripExpense) => {
+      updateTripFinance(id, (_trip, finance) => ({
+        ...finance,
+        expenses: [...finance.expenses, expense],
+      }))
+    },
+    [updateTripFinance]
+  )
+
+  const updateTripExpense = React.useCallback(
+    (id: string, expenseId: string, patch: Partial<TripExpense>) => {
+      updateTripFinance(id, (_trip, finance) => ({
+        ...finance,
+        expenses: finance.expenses.map((expense) =>
+          expense.id === expenseId
+            ? {
+                ...expense,
+                ...patch,
+                id: expense.id,
+                tripId: expense.tripId,
+                updatedAt: new Date().toISOString(),
+              }
+            : expense
+        ),
+      }))
+    },
+    [updateTripFinance]
+  )
+
+  const deleteTripExpense = React.useCallback(
+    (id: string, expenseId: string) => {
+      updateTripFinance(id, (_trip, finance) => ({
+        ...finance,
+        expenses: finance.expenses.filter((expense) => expense.id !== expenseId),
+      }))
+    },
+    [updateTripFinance]
+  )
+
+  const updateFinanceAutomation = React.useCallback(
+    (id: string, patch: Partial<TripFinanceAutomation>) => {
+      updateTripFinance(
+        id,
+        (_trip, finance) => ({
+          ...finance,
+          automation: {
+            ...finance.automation,
+            ...patch,
+          },
+        }),
+        { runAutomation: false }
+      )
+    },
+    [updateTripFinance]
+  )
+
+  const updateFinanceSettings = React.useCallback(
+    (
+      id: string,
+      patch: Partial<Pick<TripFinance, "currency" | "groupModeEnabled" | "groupSize">>
+    ) => {
+      updateTripFinance(
+        id,
+        (_trip, finance) => ({
+          ...finance,
+          ...patch,
+          groupSize:
+            patch.groupSize !== undefined
+              ? Math.max(1, Math.floor(patch.groupSize))
+              : finance.groupSize,
+        }),
+        { runAutomation: false }
+      )
+    },
+    [updateTripFinance]
+  )
+
+  const runFinanceAutomationCheck = React.useCallback(
+    (id: string) => {
+      updateTripFinance(
+        id,
+        (_trip, finance) => ({
+          ...finance,
+        }),
+        { runAutomation: true }
+      )
+    },
+    [updateTripFinance]
+  )
+
   const value = React.useMemo(
-    () => ({ trips, getTripById, updateTrip }),
-    [trips, getTripById, updateTrip]
+    () => ({
+      trips,
+      getTripById,
+      updateTrip,
+      setTripBudget,
+      addTripExpense,
+      updateTripExpense,
+      deleteTripExpense,
+      updateFinanceAutomation,
+      updateFinanceSettings,
+      runFinanceAutomationCheck,
+    }),
+    [
+      trips,
+      getTripById,
+      updateTrip,
+      setTripBudget,
+      addTripExpense,
+      updateTripExpense,
+      deleteTripExpense,
+      updateFinanceAutomation,
+      updateFinanceSettings,
+      runFinanceAutomationCheck,
+    ]
   )
 
   return (
@@ -98,4 +296,28 @@ export function useTrip(
 export function useUpdateTrip(): (id: string, partial: Partial<Trip>) => void {
   const ctx = React.useContext(TripsContext)
   return ctx?.updateTrip ?? (() => {})
+}
+
+export function useTripFinanceActions(): {
+  setTripBudget: (id: string, budgetTotal: number, currency: string) => void
+  addTripExpense: (id: string, expense: TripExpense) => void
+  updateTripExpense: (id: string, expenseId: string, patch: Partial<TripExpense>) => void
+  deleteTripExpense: (id: string, expenseId: string) => void
+  updateFinanceAutomation: (id: string, patch: Partial<TripFinanceAutomation>) => void
+  updateFinanceSettings: (
+    id: string,
+    patch: Partial<Pick<TripFinance, "currency" | "groupModeEnabled" | "groupSize">>
+  ) => void
+  runFinanceAutomationCheck: (id: string) => void
+} {
+  const ctx = React.useContext(TripsContext)
+  return {
+    setTripBudget: ctx?.setTripBudget ?? (() => {}),
+    addTripExpense: ctx?.addTripExpense ?? (() => {}),
+    updateTripExpense: ctx?.updateTripExpense ?? (() => {}),
+    deleteTripExpense: ctx?.deleteTripExpense ?? (() => {}),
+    updateFinanceAutomation: ctx?.updateFinanceAutomation ?? (() => {}),
+    updateFinanceSettings: ctx?.updateFinanceSettings ?? (() => {}),
+    runFinanceAutomationCheck: ctx?.runFinanceAutomationCheck ?? (() => {}),
+  }
 }

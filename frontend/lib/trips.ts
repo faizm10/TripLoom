@@ -1,5 +1,57 @@
 export type TripStatus = "planning" | "booked" | "in_progress"
 
+export type ExpenseCategory =
+  | "flights"
+  | "hotels"
+  | "transit"
+  | "food"
+  | "activities"
+  | "misc"
+
+export type SplitMode = "equal" | "custom"
+
+export type FinanceGuardrailStatus = "on_track" | "watch" | "over"
+
+export type TripExpenseSplit = {
+  travelerId: string
+  amount: number
+}
+
+export type TripExpense = {
+  id: string
+  tripId: string
+  date: string
+  category: ExpenseCategory
+  title: string
+  amount: number
+  currency: string
+  payerName: string
+  splitMode: SplitMode
+  splits?: TripExpenseSplit[]
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type TripFinanceAutomation = {
+  enabled: boolean
+  warnAtPercent: number
+  criticalAtPercent: number
+  showDailyPaceAlerts: boolean
+  suggestCutbackCategories: boolean
+  lastRunAt?: string
+  lastStatus?: FinanceGuardrailStatus
+}
+
+export type TripFinance = {
+  budgetTotal: number
+  currency: string
+  groupModeEnabled: boolean
+  groupSize: number
+  expenses: TripExpense[]
+  automation: TripFinanceAutomation
+}
+
 export type Trip = {
   id: string
   destination: string
@@ -19,6 +71,7 @@ export type Trip = {
   approvalsPending: number
   budgetTotal: number
   perPerson: number
+  finance?: TripFinance
   hotelArea?: string
   flightSummary?: string
   hotelSummary?: string
@@ -30,6 +83,16 @@ export type TripBuckets = {
   current: Trip[]
   past: Trip[]
 }
+
+const DEFAULT_FINANCE_AUTOMATION: TripFinanceAutomation = {
+  enabled: false,
+  warnAtPercent: 90,
+  criticalAtPercent: 100,
+  showDailyPaceAlerts: true,
+  suggestCutbackCategories: true,
+}
+
+const DEFAULT_FINANCE_CURRENCY = "CAD"
 
 const trips: Trip[] = [
   {
@@ -123,6 +186,249 @@ export function getTripStatusLabel(status: TripStatus): string {
   return status.charAt(0).toUpperCase() + status.slice(1)
 }
 
+function sanitizeNumber(value: unknown, fallback = 0): number {
+  if (typeof value !== "number" || Number.isNaN(value) || !Number.isFinite(value)) {
+    return fallback
+  }
+  return value
+}
+
+function sanitizePositive(value: unknown, fallback = 0): number {
+  const num = sanitizeNumber(value, fallback)
+  return num < 0 ? fallback : num
+}
+
+function toIsoDate(value: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return ""
+  return parsed.toISOString().slice(0, 10)
+}
+
+function normalizeExpense(tripId: string, raw: Partial<TripExpense>): TripExpense | null {
+  if (!raw.id || !raw.title || !raw.payerName || !raw.date || !raw.category) return null
+  const amount = sanitizePositive(raw.amount, 0)
+  if (amount <= 0) return null
+
+  return {
+    id: raw.id,
+    tripId,
+    date: toIsoDate(raw.date),
+    category: raw.category,
+    title: raw.title,
+    amount,
+    currency: raw.currency || DEFAULT_FINANCE_CURRENCY,
+    payerName: raw.payerName,
+    splitMode: raw.splitMode === "custom" ? "custom" : "equal",
+    splits:
+      raw.splitMode === "custom" && Array.isArray(raw.splits)
+        ? raw.splits
+            .map((split) => ({
+              travelerId: split.travelerId,
+              amount: sanitizePositive(split.amount, 0),
+            }))
+            .filter((split) => split.travelerId && split.amount >= 0)
+        : undefined,
+    notes: raw.notes?.trim() || undefined,
+    createdAt: raw.createdAt || new Date().toISOString(),
+    updatedAt: raw.updatedAt || new Date().toISOString(),
+  }
+}
+
+export function getTripFinance(trip: Trip): TripFinance {
+  const legacyBudget = sanitizePositive(trip.budgetTotal, 0)
+
+  const automationInput = trip.finance?.automation
+  const automation: TripFinanceAutomation = {
+    enabled: Boolean(automationInput?.enabled ?? DEFAULT_FINANCE_AUTOMATION.enabled),
+    warnAtPercent: sanitizePositive(
+      automationInput?.warnAtPercent,
+      DEFAULT_FINANCE_AUTOMATION.warnAtPercent
+    ),
+    criticalAtPercent: sanitizePositive(
+      automationInput?.criticalAtPercent,
+      DEFAULT_FINANCE_AUTOMATION.criticalAtPercent
+    ),
+    showDailyPaceAlerts:
+      automationInput?.showDailyPaceAlerts ?? DEFAULT_FINANCE_AUTOMATION.showDailyPaceAlerts,
+    suggestCutbackCategories:
+      automationInput?.suggestCutbackCategories ??
+      DEFAULT_FINANCE_AUTOMATION.suggestCutbackCategories,
+    lastRunAt: automationInput?.lastRunAt,
+    lastStatus: automationInput?.lastStatus,
+  }
+
+  if (automation.criticalAtPercent < automation.warnAtPercent) {
+    automation.criticalAtPercent = automation.warnAtPercent
+  }
+
+  const expenses = Array.isArray(trip.finance?.expenses)
+    ? trip.finance?.expenses
+        .map((expense) => normalizeExpense(trip.id, expense))
+        .filter((expense): expense is TripExpense => Boolean(expense))
+    : []
+
+  return {
+    budgetTotal: sanitizePositive(trip.finance?.budgetTotal, legacyBudget),
+    currency: trip.finance?.currency || DEFAULT_FINANCE_CURRENCY,
+    groupModeEnabled: Boolean(trip.finance?.groupModeEnabled ?? trip.isGroupTrip),
+    groupSize: Math.max(
+      1,
+      sanitizePositive(trip.finance?.groupSize, trip.travelers > 0 ? trip.travelers : 1)
+    ),
+    expenses,
+    automation,
+  }
+}
+
+export function getFinanceSummary(
+  trip: Trip,
+  referenceDate = new Date()
+): {
+  budgetTotal: number
+  currency: string
+  spent: number
+  remaining: number
+  perPersonEstimate: number
+  expenseCount: number
+  totalTripDays: number
+  elapsedTripDays: number
+  actualDaily: number
+  plannedDaily: number
+} {
+  const finance = getTripFinance(trip)
+  const spent = finance.expenses.reduce((total, expense) => total + expense.amount, 0)
+  const remaining = finance.budgetTotal - spent
+  const travelers = finance.groupModeEnabled
+    ? Math.max(1, finance.groupSize)
+    : trip.travelers > 0
+      ? trip.travelers
+      : 1
+  const perPersonEstimate = spent / travelers
+  const totalTripDays = trip.totalDays > 0 ? trip.totalDays : 1
+
+  const today = startOfUtcDay(referenceDate)
+  const start = parseDateUtc(trip.startDate)
+  const end = parseDateUtc(trip.endDate)
+
+  let elapsedTripDays = 1
+  if (today < start) {
+    elapsedTripDays = 1
+  } else if (today > end) {
+    elapsedTripDays = totalTripDays
+  } else {
+    const elapsedMs = today.getTime() - start.getTime()
+    elapsedTripDays = Math.min(totalTripDays, Math.max(1, Math.floor(elapsedMs / 86400000) + 1))
+  }
+
+  const plannedDaily = finance.budgetTotal > 0 ? finance.budgetTotal / totalTripDays : 0
+  const actualDaily = spent > 0 ? spent / elapsedTripDays : 0
+
+  return {
+    budgetTotal: finance.budgetTotal,
+    currency: finance.currency,
+    spent,
+    remaining,
+    perPersonEstimate,
+    expenseCount: finance.expenses.length,
+    totalTripDays,
+    elapsedTripDays,
+    actualDaily,
+    plannedDaily,
+  }
+}
+
+export function runFinanceGuardrails(
+  trip: Trip,
+  referenceDate = new Date()
+): {
+  status: FinanceGuardrailStatus
+  ratioPercent: number
+  projectedExceedDay: number | null
+  suggestions: string[]
+} {
+  const finance = getTripFinance(trip)
+  const summary = getFinanceSummary(trip, referenceDate)
+
+  if (summary.budgetTotal <= 0 || summary.plannedDaily <= 0) {
+    return {
+      status: "on_track",
+      ratioPercent: 0,
+      projectedExceedDay: null,
+      suggestions: ["Set a trip budget to enable pacing guidance."],
+    }
+  }
+
+  const ratioPercent = (summary.actualDaily / summary.plannedDaily) * 100
+  let status: FinanceGuardrailStatus = "on_track"
+
+  if (ratioPercent > finance.automation.criticalAtPercent) {
+    status = "over"
+  } else if (ratioPercent > finance.automation.warnAtPercent) {
+    status = "watch"
+  }
+
+  const projectedExceedDay =
+    summary.actualDaily > 0 ? Math.ceil(summary.budgetTotal / summary.actualDaily) : null
+
+  const suggestions: string[] = []
+  if (
+    projectedExceedDay &&
+    projectedExceedDay <= summary.totalTripDays &&
+    Number.isFinite(projectedExceedDay)
+  ) {
+    suggestions.push(`At current pace you may exceed budget by Day ${projectedExceedDay}.`)
+  }
+
+  const remainingDays = Math.max(1, summary.totalTripDays - summary.elapsedTripDays + 1)
+  const expectedSpend = summary.actualDaily * summary.totalTripDays
+  const overrun = Math.max(0, expectedSpend - summary.budgetTotal)
+
+  if (overrun > 0) {
+    const cutPerDay = overrun / remainingDays
+    suggestions.push(`Reduce daily spend by about ${cutPerDay.toFixed(0)} to stay on plan.`)
+    suggestions.push(
+      `You can still stay under budget if the next ${remainingDays} days cap near ${(summary.remaining / remainingDays).toFixed(0)} per day.`
+    )
+  }
+
+  if (finance.automation.suggestCutbackCategories && finance.expenses.length > 0) {
+    const categoryTotals = finance.expenses.reduce<Record<ExpenseCategory, number>>(
+      (acc, expense) => {
+        acc[expense.category] = (acc[expense.category] || 0) + expense.amount
+        return acc
+      },
+      {
+        flights: 0,
+        hotels: 0,
+        transit: 0,
+        food: 0,
+        activities: 0,
+        misc: 0,
+      }
+    )
+    const topCategory = (Object.keys(categoryTotals) as ExpenseCategory[]).sort(
+      (a, b) => categoryTotals[b] - categoryTotals[a]
+    )[0]
+    if (topCategory && categoryTotals[topCategory] > 0) {
+      suggestions.push(
+        `${topCategory.charAt(0).toUpperCase() + topCategory.slice(1)} is the highest spend category so far.`
+      )
+    }
+  }
+
+  if (suggestions.length === 0) {
+    suggestions.push("Spending pace is healthy. Keep logging expenses daily.")
+  }
+
+  return { status, ratioPercent, projectedExceedDay: projectedExceedDay ?? null, suggestions }
+}
+
+export function isFinanceComplete(trip: Trip): boolean {
+  const finance = getTripFinance(trip)
+  return finance.budgetTotal > 0 && finance.expenses.length > 0
+}
+
 export function getNextStep(trip: Trip): {
   title: string
   description: string
@@ -196,7 +502,7 @@ export function getNextStep(trip: Trip): {
     }
   }
 
-  if (!trip.financeSet) {
+  if (!isFinanceComplete(trip)) {
     return {
       title: "Set finance tracking",
       description: "Configure split rules, budget timeline, and FX alerts.",
@@ -227,7 +533,7 @@ export function getMissingChecklist(trip: Trip): string[] {
   if (!trip.selectedHotel) missing.push("Hotel not selected")
   if (trip.itineraryDaysPlanned === 0) missing.push("Itinerary not started")
   if (!trip.transitSaved) missing.push("Transit routes not saved")
-  if (!trip.financeSet) missing.push("Finance setup incomplete")
+  if (!isFinanceComplete(trip)) missing.push("Finance setup incomplete")
   if (trip.isGroupTrip && trip.approvalsPending > 0) {
     missing.push(`${trip.approvalsPending} approvals pending`)
   }

@@ -47,7 +47,7 @@ export function DestinationSearch({
   onSelect?: (suggestion: DestinationSuggestion) => void
   placeholder?: string
   className?: string
-} & Omit<React.ComponentProps<typeof Input>, "value" | "onChange">) {
+} & Omit<React.ComponentProps<typeof Input>, "value" | "onChange" | "onSelect">) {
   const [inputValue, setInputValue] = useState(value ?? "")
   const [query, setQuery] = useState("")
   const [results, setResults] = useState<DestinationSuggestion[]>([])

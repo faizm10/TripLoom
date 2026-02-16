@@ -1,11 +1,7 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono, Outfit } from "next/font/google";
-import { TripsProvider } from "@/components/providers/trips-provider";
-import { Toaster } from "@/components/ui/sonner";
-import "./globals.css";
+import type { Metadata } from "next"
+import { Geist, Geist_Mono, Outfit } from "next/font/google"
 import { TripsProvider } from "@/components/providers/trips-provider"
 import { Toaster } from "@/components/ui/sonner"
-
 import "./globals.css"
 
 const outfit = Outfit({ subsets: ["latin"], variable: "--font-sans" })

@@ -28,6 +28,11 @@ export type TripExpense = {
   payerName: string
   splitMode: SplitMode
   splits?: TripExpenseSplit[]
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
 export type TransitMode =
   | "subway"
   | "bus"

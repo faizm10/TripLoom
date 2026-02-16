@@ -1,7 +1,14 @@
 "use client"
 
 import * as React from "react"
-import { AlertTriangleIcon, CheckCircle2Icon, SaveIcon, SparklesIcon, Trash2Icon } from "lucide-react"
+import {
+  AlertTriangleIcon,
+  CheckCircle2Icon,
+  SaveIcon,
+  Settings2Icon,
+  SparklesIcon,
+  Trash2Icon,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { useTripFinanceActions } from "@/components/providers/trips-provider"
@@ -10,6 +17,14 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import {
@@ -139,6 +154,7 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
   const [budgetTotal, setBudgetTotalState] = React.useState(String(finance.budgetTotal || ""))
   const [budgetCurrency, setBudgetCurrency] = React.useState(finance.currency || "CAD")
   const [budgetBuffer, setBudgetBuffer] = React.useState("10")
+  const [rateDrafts, setRateDrafts] = React.useState<Record<string, string>>({})
   const [draft, setDraft] = React.useState<ExpenseDraft>(() =>
     defaultDraft(trip, finance.currency || "CAD")
   )
@@ -147,6 +163,10 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
   const [formError, setFormError] = React.useState("")
   const previousStatusRef = React.useRef<FinanceGuardrailStatus | undefined>(
     finance.automation.lastStatus
+  )
+  const exchangeRatesSignature = React.useMemo(
+    () => JSON.stringify(finance.exchangeRates),
+    [finance.exchangeRates]
   )
 
   React.useEffect(() => {
@@ -157,6 +177,22 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
       currency: finance.currency || "CAD",
     }))
   }, [finance.budgetTotal, finance.currency])
+
+  React.useEffect(() => {
+    const nextRates: Record<string, string> = {}
+    for (const [currency, rate] of Object.entries(finance.exchangeRates)) {
+      nextRates[currency] = String(rate)
+    }
+    setRateDrafts((prev) => {
+      const prevKeys = Object.keys(prev)
+      const nextKeys = Object.keys(nextRates)
+      if (prevKeys.length !== nextKeys.length) return nextRates
+      for (const key of nextKeys) {
+        if (prev[key] !== nextRates[key]) return nextRates
+      }
+      return prev
+    })
+  }, [exchangeRatesSignature, finance.exchangeRates])
 
   React.useEffect(() => {
     const prev = previousStatusRef.current
@@ -197,11 +233,23 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
     return majorExpenseCategories.map((category) => {
       const spent = finance.expenses
         .filter((expense) => expense.category === category.value)
-        .reduce((sum, expense) => sum + expense.amount, 0)
+        .reduce((sum, expense) => {
+          const expenseCurrency = (expense.currency || finance.currency).toUpperCase()
+          const rate = finance.exchangeRates[expenseCurrency] || 1
+          return sum + expense.amount * rate
+        }, 0)
       const share = summary.budgetTotal > 0 ? Math.min(100, (spent / summary.budgetTotal) * 100) : 0
       return { ...category, spent, share }
     })
-  }, [finance.expenses, summary.budgetTotal])
+  }, [finance.currency, finance.exchangeRates, finance.expenses, summary.budgetTotal])
+
+  const currenciesInUse = React.useMemo(() => {
+    const set = new Set<string>([finance.currency.toUpperCase()])
+    for (const expense of finance.expenses) {
+      set.add((expense.currency || finance.currency).toUpperCase())
+    }
+    return Array.from(set).sort()
+  }, [finance.currency, finance.expenses])
 
   function resetDraft() {
     setDraft(defaultDraft(trip, finance.currency || "CAD"))
@@ -330,6 +378,17 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
     toast.success("Guardrail check completed.")
   }
 
+  function updateRate(currency: string, value: string) {
+    setRateDrafts((current) => ({ ...current, [currency]: value }))
+    const numeric = Number(value)
+    if (!Number.isFinite(numeric) || numeric <= 0) return
+    updateFinanceSettings(trip.id, {
+      exchangeRates: {
+        [currency]: numeric,
+      },
+    })
+  }
+
   const paceTone =
     guardrail.status === "on_track"
       ? "text-emerald-600"
@@ -382,6 +441,11 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
             </CardHeader>
           </Card>
         </div>
+        {summary.missingRateCurrencies.length > 0 ? (
+          <div className="rounded-none border border-amber-400/40 bg-amber-500/10 p-2 text-xs text-amber-700">
+            Missing conversion rate for: {summary.missingRateCurrencies.join(", ")}. Totals use 1:1 until set.
+          </div>
+        ) : null}
       </section>
 
       <section className="space-y-2">
@@ -421,15 +485,20 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
 
       <section className="space-y-2">
         <h2 className="text-sm font-semibold">Control budget</h2>
-        <div className="grid gap-4 xl:grid-cols-2">
-          <Card>
-            <CardHeader>
-              <CardTitle>Budget Setup</CardTitle>
-              <CardDescription>Budget, currency, and group split settings.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="sm:col-span-2 space-y-1">
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-2 pt-4">
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="rounded-none">
+                  <Settings2Icon /> Budget Settings
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[22rem] max-w-[92vw]">
+                <PopoverHeader>
+                  <PopoverTitle>Budget Settings</PopoverTitle>
+                  <PopoverDescription>Budget, currency, and group.</PopoverDescription>
+                </PopoverHeader>
+                <div className="grid gap-2">
                   <label className="text-xs font-medium">Total budget</label>
                   <Input
                     type="number"
@@ -437,18 +506,13 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
                     value={budgetTotal}
                     onChange={(event) => setBudgetTotalState(event.target.value)}
                   />
-                </div>
-                <div className="space-y-1">
                   <label className="text-xs font-medium">Currency</label>
                   <Input
                     value={budgetCurrency}
                     maxLength={3}
                     onChange={(event) => setBudgetCurrency(event.target.value.toUpperCase())}
                   />
-                </div>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1">
+                  <p className="text-[11px] text-muted-foreground">Base currency for totals and guardrails.</p>
                   <label className="text-xs font-medium">Buffer %</label>
                   <Input
                     type="number"
@@ -456,127 +520,135 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
                     value={budgetBuffer}
                     onChange={(event) => setBudgetBuffer(event.target.value)}
                   />
-                </div>
-                <div className="flex items-end">
+                  <div className="grid gap-2 rounded-none border p-2">
+                    <label className="flex items-center justify-between text-xs font-medium">
+                      Group mode
+                      <Switch
+                        checked={finance.groupModeEnabled}
+                        onCheckedChange={toggleGroupMode}
+                      />
+                    </label>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Group size</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={finance.groupSize}
+                        disabled={!finance.groupModeEnabled}
+                        onChange={(event) =>
+                          updateFinanceSettings(trip.id, {
+                            groupSize: Number(event.target.value || 1),
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-2 rounded-none border p-2">
+                    <p className="text-xs font-medium">Conversion rates to {budgetCurrency || "CAD"}</p>
+                    {currenciesInUse.map((currency) => {
+                      const isBase = currency === (budgetCurrency || "CAD").toUpperCase()
+                      return (
+                        <div key={currency} className="grid grid-cols-[64px_1fr] items-center gap-2">
+                          <span className="text-xs font-medium">{currency}</span>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.0001"
+                            disabled={isBase}
+                            value={isBase ? "1" : rateDrafts[currency] ?? String(finance.exchangeRates[currency] || "")}
+                            onChange={(event) => updateRate(currency, event.target.value)}
+                          />
+                        </div>
+                      )
+                    })}
+                  </div>
                   <Button className="w-full rounded-none" onClick={saveBudget}>
                     <SaveIcon /> Save Budget
                   </Button>
                 </div>
-              </div>
+              </PopoverContent>
+            </Popover>
 
-              <div className="grid gap-3 rounded-none border p-3 sm:grid-cols-2">
-                <label className="flex items-center justify-between text-xs font-medium">
-                  Group mode
-                  <Switch
-                    checked={finance.groupModeEnabled}
-                    onCheckedChange={toggleGroupMode}
-                  />
-                </label>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium">Group size</label>
-                  <Input
-                    type="number"
-                    min="1"
-                    value={finance.groupSize}
-                    disabled={!finance.groupModeEnabled}
-                    onChange={(event) =>
-                      updateFinanceSettings(trip.id, {
-                        groupSize: Number(event.target.value || 1),
-                      })
-                    }
-                  />
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="rounded-none">
+                  <SparklesIcon /> Guardrails
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[22rem] max-w-[92vw]">
+                <PopoverHeader>
+                  <PopoverTitle>Automation Guardrails</PopoverTitle>
+                  <PopoverDescription>Pace checks and alerts.</PopoverDescription>
+                </PopoverHeader>
+                <div className="space-y-2">
+                  <label className="flex items-center justify-between text-xs font-medium">
+                    Enable guardrails
+                    <Switch
+                      checked={finance.automation.enabled}
+                      onCheckedChange={toggleAutomation}
+                    />
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Warn %</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        max="200"
+                        value={finance.automation.warnAtPercent}
+                        onChange={(event) =>
+                          updateFinanceAutomation(trip.id, {
+                            warnAtPercent: Number(event.target.value || 0),
+                          })
+                        }
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Critical %</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        max="300"
+                        value={finance.automation.criticalAtPercent}
+                        onChange={(event) =>
+                          updateFinanceAutomation(trip.id, {
+                            criticalAtPercent: Number(event.target.value || 0),
+                          })
+                        }
+                      />
+                    </div>
+                  </div>
+                  <label className="flex items-center justify-between text-xs font-medium">
+                    Daily pace alerts
+                    <Switch
+                      checked={finance.automation.showDailyPaceAlerts}
+                      onCheckedChange={(checked) =>
+                        updateFinanceAutomation(trip.id, { showDailyPaceAlerts: checked })
+                      }
+                    />
+                  </label>
+                  <label className="flex items-center justify-between text-xs font-medium">
+                    Cutback suggestions
+                    <Switch
+                      checked={finance.automation.suggestCutbackCategories}
+                      onCheckedChange={(checked) =>
+                        updateFinanceAutomation(trip.id, { suggestCutbackCategories: checked })
+                      }
+                    />
+                  </label>
+                  <div className="rounded-none border p-2 text-xs text-muted-foreground">
+                    {guardrail.projectedExceedDay
+                      ? `May exceed by Day ${guardrail.projectedExceedDay}.`
+                      : "Pace is within budget range."}
+                  </div>
+                  <Button variant="outline" className="w-full rounded-none" onClick={runAutomationNow}>
+                    <SparklesIcon /> Run Check Now
+                  </Button>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Automation Guardrails</CardTitle>
-              <CardDescription>Pace checks and alerts.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between rounded-none border p-3">
-                <div>
-                  <p className="text-xs font-medium">Enable Budget Guardrails</p>
-                  <p className="text-xs text-muted-foreground">Runs on budget/expense updates.</p>
-                </div>
-                <Switch
-                  checked={finance.automation.enabled}
-                  onCheckedChange={toggleAutomation}
-                />
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-medium">Warn at %</label>
-                  <Input
-                    type="number"
-                    min="1"
-                    max="200"
-                    value={finance.automation.warnAtPercent}
-                    onChange={(event) =>
-                      updateFinanceAutomation(trip.id, {
-                        warnAtPercent: Number(event.target.value || 0),
-                      })
-                    }
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-medium">Critical at %</label>
-                  <Input
-                    type="number"
-                    min="1"
-                    max="300"
-                    value={finance.automation.criticalAtPercent}
-                    onChange={(event) =>
-                      updateFinanceAutomation(trip.id, {
-                        criticalAtPercent: Number(event.target.value || 0),
-                      })
-                    }
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2 rounded-none border p-3">
-                <label className="flex items-center justify-between text-xs font-medium">
-                  Show daily pace alerts
-                  <Switch
-                    checked={finance.automation.showDailyPaceAlerts}
-                    onCheckedChange={(checked) =>
-                      updateFinanceAutomation(trip.id, { showDailyPaceAlerts: checked })
-                    }
-                  />
-                </label>
-                <label className="flex items-center justify-between text-xs font-medium">
-                  Suggest cutback categories
-                  <Switch
-                    checked={finance.automation.suggestCutbackCategories}
-                    onCheckedChange={(checked) =>
-                      updateFinanceAutomation(trip.id, { suggestCutbackCategories: checked })
-                    }
-                  />
-                </label>
-              </div>
-
-              <div className="rounded-none border p-3 text-xs">
-                <p className="font-medium">Preview</p>
-                <p className="mt-1 text-muted-foreground">
-                  {guardrail.projectedExceedDay
-                    ? `At current pace you may exceed budget by Day ${guardrail.projectedExceedDay}.`
-                    : "Spending pace currently fits inside your budget timeline."}
-                </p>
-                <p className="mt-2 text-muted-foreground">
-                  Last run: {finance.automation.lastRunAt ? formatDateShort(finance.automation.lastRunAt.slice(0, 10)) : "Not run yet"}
-                </p>
-              </div>
-
-              <Button variant="outline" className="w-full rounded-none" onClick={runAutomationNow}>
-                <SparklesIcon /> Run Check Now
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
+              </PopoverContent>
+            </Popover>
+          </CardContent>
+        </Card>
       </section>
 
       <section className="space-y-2">
@@ -783,7 +855,10 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
                           </TableCell>
                         </TableRow>
                         {expenses.map((expense) => {
-                          const impact = summary.plannedDaily > 0 && expense.amount > summary.plannedDaily
+                          const impact =
+                            expense.category !== "flights" &&
+                            summary.plannedDaily > 0 &&
+                            expense.amount > summary.plannedDaily
                           return (
                             <TableRow key={expense.id}>
                               <TableCell>{formatDateShort(expense.date)}</TableCell>

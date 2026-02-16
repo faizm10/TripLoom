@@ -48,6 +48,7 @@ export type TripFinance = {
   currency: string
   groupModeEnabled: boolean
   groupSize: number
+  exchangeRates: Record<string, number>
   expenses: TripExpense[]
   automation: TripFinanceAutomation
 }
@@ -268,14 +269,26 @@ export function getTripFinance(trip: Trip): TripFinance {
         .filter((expense): expense is TripExpense => Boolean(expense))
     : []
 
+  const exchangeRatesRaw = trip.finance?.exchangeRates ?? {}
+  const exchangeRates: Record<string, number> = {}
+  for (const [currency, rate] of Object.entries(exchangeRatesRaw)) {
+    const normalizedCurrency = currency.toUpperCase()
+    const numericRate = sanitizePositive(rate, 0)
+    if (!normalizedCurrency) continue
+    if (numericRate > 0) exchangeRates[normalizedCurrency] = numericRate
+  }
+  const baseCurrency = (trip.finance?.currency || DEFAULT_FINANCE_CURRENCY).toUpperCase()
+  exchangeRates[baseCurrency] = 1
+
   return {
     budgetTotal: sanitizePositive(trip.finance?.budgetTotal, legacyBudget),
-    currency: trip.finance?.currency || DEFAULT_FINANCE_CURRENCY,
+    currency: baseCurrency,
     groupModeEnabled: Boolean(trip.finance?.groupModeEnabled ?? trip.isGroupTrip),
     groupSize: Math.max(
       1,
       sanitizePositive(trip.finance?.groupSize, trip.travelers > 0 ? trip.travelers : 1)
     ),
+    exchangeRates,
     expenses,
     automation,
   }
@@ -291,13 +304,24 @@ export function getFinanceSummary(
   remaining: number
   perPersonEstimate: number
   expenseCount: number
+  missingRateCurrencies: string[]
   totalTripDays: number
   elapsedTripDays: number
   actualDaily: number
   plannedDaily: number
 } {
   const finance = getTripFinance(trip)
-  const spent = finance.expenses.reduce((total, expense) => total + expense.amount, 0)
+  const missingRateCurrencies = new Set<string>()
+  const spent = finance.expenses.reduce((total, expense) => {
+    const expenseCurrency = (expense.currency || finance.currency).toUpperCase()
+    if (expenseCurrency === finance.currency.toUpperCase()) return total + expense.amount
+    const rate = finance.exchangeRates[expenseCurrency]
+    if (!rate || rate <= 0) {
+      missingRateCurrencies.add(expenseCurrency)
+      return total + expense.amount
+    }
+    return total + expense.amount * rate
+  }, 0)
   const remaining = finance.budgetTotal - spent
   const travelers = finance.groupModeEnabled
     ? Math.max(1, finance.groupSize)
@@ -331,6 +355,7 @@ export function getFinanceSummary(
     remaining,
     perPersonEstimate,
     expenseCount: finance.expenses.length,
+    missingRateCurrencies: Array.from(missingRateCurrencies).sort(),
     totalTripDays,
     elapsedTripDays,
     actualDaily,
@@ -349,6 +374,10 @@ export function runFinanceGuardrails(
 } {
   const finance = getTripFinance(trip)
   const summary = getFinanceSummary(trip, referenceDate)
+  const trackedSpend = finance.expenses
+    .filter((expense) => expense.category !== "flights")
+    .reduce((total, expense) => total + expense.amount, 0)
+  const trackedActualDaily = trackedSpend > 0 ? trackedSpend / summary.elapsedTripDays : 0
 
   if (summary.budgetTotal <= 0 || summary.plannedDaily <= 0) {
     return {
@@ -359,7 +388,7 @@ export function runFinanceGuardrails(
     }
   }
 
-  const ratioPercent = (summary.actualDaily / summary.plannedDaily) * 100
+  const ratioPercent = (trackedActualDaily / summary.plannedDaily) * 100
   let status: FinanceGuardrailStatus = "on_track"
 
   if (ratioPercent > finance.automation.criticalAtPercent) {
@@ -369,7 +398,7 @@ export function runFinanceGuardrails(
   }
 
   const projectedExceedDay =
-    summary.actualDaily > 0 ? Math.ceil(summary.budgetTotal / summary.actualDaily) : null
+    trackedActualDaily > 0 ? Math.ceil(summary.budgetTotal / trackedActualDaily) : null
 
   const suggestions: string[] = []
   if (
@@ -381,7 +410,7 @@ export function runFinanceGuardrails(
   }
 
   const remainingDays = Math.max(1, summary.totalTripDays - summary.elapsedTripDays + 1)
-  const expectedSpend = summary.actualDaily * summary.totalTripDays
+  const expectedSpend = trackedActualDaily * summary.totalTripDays
   const overrun = Math.max(0, expectedSpend - summary.budgetTotal)
 
   if (overrun > 0) {
@@ -407,9 +436,9 @@ export function runFinanceGuardrails(
         misc: 0,
       }
     )
-    const topCategory = (Object.keys(categoryTotals) as ExpenseCategory[]).sort(
-      (a, b) => categoryTotals[b] - categoryTotals[a]
-    )[0]
+    const topCategory = (Object.keys(categoryTotals) as ExpenseCategory[])
+      .filter((category) => category !== "flights")
+      .sort((a, b) => categoryTotals[b] - categoryTotals[a])[0]
     if (topCategory && categoryTotals[topCategory] > 0) {
       suggestions.push(
         `${topCategory.charAt(0).toUpperCase() + topCategory.slice(1)} is the highest spend category so far.`

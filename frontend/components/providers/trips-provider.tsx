@@ -60,7 +60,9 @@ type TripsContextValue = {
   ) => void
   updateFinanceSettings: (
     id: string,
-    patch: Partial<Pick<TripFinance, "currency" | "groupModeEnabled" | "groupSize">>
+    patch: Partial<
+      Pick<TripFinance, "currency" | "groupModeEnabled" | "groupSize" | "exchangeRates">
+    >
   ) => void
   runFinanceAutomationCheck: (id: string) => void
 }
@@ -146,10 +148,15 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
 
   const setTripBudget = React.useCallback(
     (id: string, budgetTotal: number, currency: string) => {
+      const baseCurrency = (currency || "CAD").toUpperCase()
       updateTripFinance(id, (_trip, finance) => ({
         ...finance,
         budgetTotal: Math.max(0, budgetTotal),
-        currency: currency || "CAD",
+        currency: baseCurrency,
+        exchangeRates: {
+          ...finance.exchangeRates,
+          [baseCurrency]: 1,
+        },
       }))
     },
     [updateTripFinance]
@@ -215,17 +222,25 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
   const updateFinanceSettings = React.useCallback(
     (
       id: string,
-      patch: Partial<Pick<TripFinance, "currency" | "groupModeEnabled" | "groupSize">>
+      patch: Partial<
+        Pick<TripFinance, "currency" | "groupModeEnabled" | "groupSize" | "exchangeRates">
+      >
     ) => {
       updateTripFinance(
         id,
         (_trip, finance) => ({
           ...finance,
           ...patch,
+          currency: (patch.currency || finance.currency || "CAD").toUpperCase(),
           groupSize:
             patch.groupSize !== undefined
               ? Math.max(1, Math.floor(patch.groupSize))
               : finance.groupSize,
+          exchangeRates: {
+            ...finance.exchangeRates,
+            ...(patch.exchangeRates || {}),
+            [(patch.currency || finance.currency || "CAD").toUpperCase()]: 1,
+          },
         }),
         { runAutomation: false }
       )
@@ -306,7 +321,9 @@ export function useTripFinanceActions(): {
   updateFinanceAutomation: (id: string, patch: Partial<TripFinanceAutomation>) => void
   updateFinanceSettings: (
     id: string,
-    patch: Partial<Pick<TripFinance, "currency" | "groupModeEnabled" | "groupSize">>
+    patch: Partial<
+      Pick<TripFinance, "currency" | "groupModeEnabled" | "groupSize" | "exchangeRates">
+    >
   ) => void
   runFinanceAutomationCheck: (id: string) => void
 } {

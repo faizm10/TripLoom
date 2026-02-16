@@ -78,6 +78,11 @@ type ExpenseDraft = {
   splits: Record<string, string>
 }
 
+type HotelPricingMode = "one_person" | "x_people" | "full_booking"
+type HotelSplitBy = "nights" | "days"
+
+const HOTEL_ALLOCATOR_NOTE_PREFIX = "[hotel_allocator_v1]"
+
 function formatDateLabel(date: string): string {
   if (!date) return "Date TBD"
   const [year, month, day] = date.split("-").map(Number)
@@ -133,6 +138,18 @@ function buildTravelers(totalCount: number): Array<{ id: string; label: string }
   }))
 }
 
+function parseIsoDateOrFallback(value: string, fallback: string): Date {
+  const source = /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : fallback
+  const [year, month, day] = source.split("-").map(Number)
+  return new Date(Date.UTC(year || 1970, (month || 1) - 1, day || 1))
+}
+
+function addUtcDays(date: string, days: number): string {
+  const base = parseIsoDateOrFallback(date, "1970-01-01")
+  base.setUTCDate(base.getUTCDate() + days)
+  return base.toISOString().slice(0, 10)
+}
+
 export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
   const fromContext = useTripPage()
   const trip = fromContext ?? tripProp
@@ -155,6 +172,19 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
   const [budgetCurrency, setBudgetCurrency] = React.useState(finance.currency || "CAD")
   const [budgetBuffer, setBudgetBuffer] = React.useState("10")
   const [rateDrafts, setRateDrafts] = React.useState<Record<string, string>>({})
+  const [hotelPopoverOpen, setHotelPopoverOpen] = React.useState(
+    !finance.expenses.some((expense) => expense.category === "hotels")
+  )
+  const [hotelTotalInput, setHotelTotalInput] = React.useState("")
+  const [hotelPricingMode, setHotelPricingMode] = React.useState<HotelPricingMode>("full_booking")
+  const [hotelPeopleCount, setHotelPeopleCount] = React.useState(
+    finance.groupModeEnabled ? finance.groupSize : Math.max(1, trip.travelers)
+  )
+  const [hotelNights, setHotelNights] = React.useState(Math.max(1, trip.totalDays - 1))
+  const [hotelDays, setHotelDays] = React.useState(Math.max(1, trip.totalDays))
+  const [hotelSplitBy, setHotelSplitBy] = React.useState<HotelSplitBy>("nights")
+  const [hotelStartDate, setHotelStartDate] = React.useState(trip.startDate)
+  const [hotelError, setHotelError] = React.useState("")
   const [draft, setDraft] = React.useState<ExpenseDraft>(() =>
     defaultDraft(trip, finance.currency || "CAD")
   )
@@ -213,8 +243,8 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
   const sortedExpenses = React.useMemo(
     () =>
       [...finance.expenses].sort((a, b) => {
-        if (a.date === b.date) return b.createdAt.localeCompare(a.createdAt)
-        return b.date.localeCompare(a.date)
+        if (a.date === b.date) return a.createdAt.localeCompare(b.createdAt)
+        return a.date.localeCompare(b.date)
       }),
     [finance.expenses]
   )
@@ -229,19 +259,29 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
     return Array.from(groups.entries())
   }, [sortedExpenses])
 
+  const hasHotelExpense = React.useMemo(
+    () => finance.expenses.some((expense) => expense.category === "hotels"),
+    [finance.expenses]
+  )
+
+  const toBaseCurrency = React.useCallback(
+    (expense: Pick<TripExpense, "amount" | "currency">): number => {
+      const expenseCurrency = (expense.currency || finance.currency).toUpperCase()
+      const rate = finance.exchangeRates[expenseCurrency] || 1
+      return expense.amount * rate
+    },
+    [finance.currency, finance.exchangeRates]
+  )
+
   const majorCategoryTotals = React.useMemo(() => {
     return majorExpenseCategories.map((category) => {
       const spent = finance.expenses
         .filter((expense) => expense.category === category.value)
-        .reduce((sum, expense) => {
-          const expenseCurrency = (expense.currency || finance.currency).toUpperCase()
-          const rate = finance.exchangeRates[expenseCurrency] || 1
-          return sum + expense.amount * rate
-        }, 0)
+        .reduce((sum, expense) => sum + toBaseCurrency(expense), 0)
       const share = summary.budgetTotal > 0 ? Math.min(100, (spent / summary.budgetTotal) * 100) : 0
       return { ...category, spent, share }
     })
-  }, [finance.currency, finance.exchangeRates, finance.expenses, summary.budgetTotal])
+  }, [finance.expenses, summary.budgetTotal, toBaseCurrency])
 
   const currenciesInUse = React.useMemo(() => {
     const set = new Set<string>([finance.currency.toUpperCase()])
@@ -387,6 +427,67 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
         [currency]: numeric,
       },
     })
+  }
+
+  function applyHotelAllocation() {
+    const enteredTotal = Number(hotelTotalInput)
+    if (!Number.isFinite(enteredTotal) || enteredTotal <= 0) {
+      setHotelError("Enter a valid hotel price.")
+      return
+    }
+
+    const peopleCount = Math.max(1, Number(hotelPeopleCount) || 1)
+    const nights = Math.max(1, Number(hotelNights) || 1)
+    const days = Math.max(1, Number(hotelDays) || 1)
+    const splitCount = hotelSplitBy === "nights" ? nights : days
+
+    let bookingTotal = enteredTotal
+    if (hotelPricingMode === "one_person") {
+      bookingTotal = enteredTotal * Math.max(1, travelerCount)
+    } else if (hotelPricingMode === "x_people") {
+      bookingTotal = enteredTotal * peopleCount
+    }
+
+    const existingAutoHotel = finance.expenses.filter(
+      (expense) =>
+        expense.category === "hotels" &&
+        typeof expense.notes === "string" &&
+        expense.notes.startsWith(HOTEL_ALLOCATOR_NOTE_PREFIX)
+    )
+    for (const item of existingAutoHotel) {
+      deleteTripExpense(trip.id, item.id)
+    }
+
+    const totalCents = Math.round(bookingTotal * 100)
+    const baseCents = Math.floor(totalCents / splitCount)
+    const remainder = totalCents - baseCents * splitCount
+    const now = new Date().toISOString()
+
+    for (let index = 0; index < splitCount; index++) {
+      const cents = baseCents + (index < remainder ? 1 : 0)
+      const amount = cents / 100
+      addTripExpense(trip.id, {
+        id:
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `${Date.now()}-${index}-${Math.random().toString(16).slice(2)}`,
+        tripId: trip.id,
+        date: addUtcDays(hotelStartDate, index),
+        title: `Hotel stay ${index + 1}/${splitCount}`,
+        amount,
+        category: "hotels",
+        payerName: "Hotel allocation",
+        currency: budgetCurrency.toUpperCase() || finance.currency,
+        splitMode: "equal",
+        notes: `${HOTEL_ALLOCATOR_NOTE_PREFIX} mode=${hotelSplitBy} count=${splitCount}`,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+
+    setHotelError("")
+    setHotelPopoverOpen(false)
+    toast.success("Hotel cost split across trip days.")
   }
 
   const paceTone =
@@ -647,6 +748,110 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
                 </div>
               </PopoverContent>
             </Popover>
+
+            <Popover open={hotelPopoverOpen} onOpenChange={setHotelPopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" className="rounded-none">
+                  Hotel Split
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[24rem] max-w-[92vw]">
+                <PopoverHeader>
+                  <PopoverTitle>Hotel Cost Allocator</PopoverTitle>
+                  <PopoverDescription>Enter full stay cost, people, and split range.</PopoverDescription>
+                </PopoverHeader>
+                <div className="grid gap-2">
+                  <label className="text-xs font-medium">Full stay price</label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={hotelTotalInput}
+                    onChange={(event) => setHotelTotalInput(event.target.value)}
+                  />
+
+                  <label className="text-xs font-medium">Price entered for</label>
+                  <Select
+                    value={hotelPricingMode}
+                    onValueChange={(value: HotelPricingMode) => setHotelPricingMode(value)}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="one_person">One person</SelectItem>
+                      <SelectItem value="x_people">X people</SelectItem>
+                      <SelectItem value="full_booking">Entire booking total</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  {hotelPricingMode === "x_people" ? (
+                    <>
+                      <label className="text-xs font-medium">People count</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={hotelPeopleCount}
+                        onChange={(event) => setHotelPeopleCount(Number(event.target.value || 1))}
+                      />
+                    </>
+                  ) : null}
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Nights</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={hotelNights}
+                        onChange={(event) => setHotelNights(Number(event.target.value || 1))}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium">Days</label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={hotelDays}
+                        onChange={(event) => setHotelDays(Number(event.target.value || 1))}
+                      />
+                    </div>
+                  </div>
+
+                  <label className="text-xs font-medium">Split across</label>
+                  <Select
+                    value={hotelSplitBy}
+                    onValueChange={(value: HotelSplitBy) => setHotelSplitBy(value)}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="nights">Nights</SelectItem>
+                      <SelectItem value="days">Days</SelectItem>
+                    </SelectContent>
+                  </Select>
+
+                  <label className="text-xs font-medium">Start date</label>
+                  <Input
+                    type="date"
+                    value={hotelStartDate}
+                    onChange={(event) => setHotelStartDate(event.target.value)}
+                  />
+
+                  {hotelError ? <p className="text-xs text-red-600">{hotelError}</p> : null}
+                  <Button className="w-full rounded-none" onClick={applyHotelAllocation}>
+                    Apply hotel split
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+
+            {!hasHotelExpense ? (
+              <p className="w-full text-xs text-muted-foreground">
+                Add hotel split first: nights, days, and people.
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       </section>
@@ -846,7 +1051,7 @@ export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
                 </TableHeader>
                 <TableBody>
                   {groupedExpenses.map(([date, expenses]) => {
-                    const subtotal = expenses.reduce((sum, item) => sum + item.amount, 0)
+                    const subtotal = expenses.reduce((sum, item) => sum + toBaseCurrency(item), 0)
                     return (
                       <React.Fragment key={date}>
                         <TableRow className="bg-muted/20">

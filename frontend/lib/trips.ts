@@ -94,6 +94,7 @@ const DEFAULT_FINANCE_AUTOMATION: TripFinanceAutomation = {
 }
 
 const DEFAULT_FINANCE_CURRENCY = "CAD"
+const HOTEL_ALLOCATOR_NOTE_PREFIX = "[hotel_allocator_v1]"
 
 const trips: Trip[] = [
   {
@@ -236,6 +237,15 @@ function normalizeExpense(tripId: string, raw: Partial<TripExpense>): TripExpens
   }
 }
 
+function getPaceWeightedAmount(expense: TripExpense, totalTripDays: number): number {
+  if (expense.category !== "hotels") return expense.amount
+  // Allocator entries are already split per day.
+  if (typeof expense.notes === "string" && expense.notes.startsWith(HOTEL_ALLOCATOR_NOTE_PREFIX)) {
+    return expense.amount
+  }
+  return expense.amount / Math.max(1, totalTripDays)
+}
+
 export function getTripFinance(trip: Trip): TripFinance {
   const legacyBudget = sanitizePositive(trip.budgetTotal, 0)
 
@@ -345,8 +355,12 @@ export function getFinanceSummary(
     elapsedTripDays = Math.min(totalTripDays, Math.max(1, Math.floor(elapsedMs / 86400000) + 1))
   }
 
+  const paceWeightedSpend = finance.expenses.reduce(
+    (total, expense) => total + getPaceWeightedAmount(expense, totalTripDays),
+    0
+  )
   const plannedDaily = finance.budgetTotal > 0 ? finance.budgetTotal / totalTripDays : 0
-  const actualDaily = spent > 0 ? spent / elapsedTripDays : 0
+  const actualDaily = paceWeightedSpend > 0 ? paceWeightedSpend / elapsedTripDays : 0
 
   return {
     budgetTotal: finance.budgetTotal,
@@ -374,10 +388,11 @@ export function runFinanceGuardrails(
 } {
   const finance = getTripFinance(trip)
   const summary = getFinanceSummary(trip, referenceDate)
-  const trackedSpend = finance.expenses
+  const trackedPaceSpend = finance.expenses
     .filter((expense) => expense.category !== "flights")
-    .reduce((total, expense) => total + expense.amount, 0)
-  const trackedActualDaily = trackedSpend > 0 ? trackedSpend / summary.elapsedTripDays : 0
+    .reduce((total, expense) => total + getPaceWeightedAmount(expense, summary.totalTripDays), 0)
+  const trackedActualDaily =
+    trackedPaceSpend > 0 ? trackedPaceSpend / summary.elapsedTripDays : 0
 
   if (summary.budgetTotal <= 0 || summary.plannedDaily <= 0) {
     return {

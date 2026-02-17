@@ -12,6 +12,7 @@ import type {
 import {
   coerceTripItineraryForTotalDays as coerceItinerary,
   computeItineraryDaysPlanned as computeDaysPlanned,
+  getDestinationTimezone,
   getFinanceSummary,
   getTripFinance,
   getTripItineraryItems,
@@ -144,6 +145,7 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
     const next: Trip = {
       id: input.id,
       destination: input.destination,
+      timezone: getDestinationTimezone(input.destination),
       startDate: start.toISOString().slice(0, 10),
       endDate: end.toISOString().slice(0, 10),
       travelers: input.travelers === "group" ? 2 : 1,
@@ -499,6 +501,7 @@ export function useCreateTrip(): (input: CreateTripInput) => Trip {
   return ctx?.createTrip ?? ((input: CreateTripInput) => ({
     id: input.id,
     destination: input.destination,
+    timezone: "UTC",
     startDate: new Date().toISOString().slice(0, 10),
     endDate: new Date().toISOString().slice(0, 10),
     travelers: input.travelers === "group" ? 2 : 1,

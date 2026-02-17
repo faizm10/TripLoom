@@ -2,27 +2,16 @@
 
 import * as React from "react"
 import {
-  DndContext,
-  DragCancelEvent,
-  DragEndEvent,
-  DragOverlay,
-  DragStartEvent,
-  PointerSensor,
-  closestCorners,
-  useDroppable,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core"
-import {
-  SortableContext,
-  arrayMove,
-  defaultAnimateLayoutChanges,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable"
-import { CSS } from "@dnd-kit/utilities"
-import { motion } from "framer-motion"
-import { CalendarDaysIcon, GripVerticalIcon, MapPinIcon, PlusIcon, SaveIcon, Trash2Icon } from "lucide-react"
+  addMinutes,
+  differenceInCalendarDays,
+  format,
+  getDay,
+  parse,
+  startOfWeek,
+} from "date-fns"
+import { enUS } from "date-fns/locale"
+import { CalendarDaysIcon, ExternalLinkIcon, LinkIcon, PlusIcon, SaveIcon, Trash2Icon } from "lucide-react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 
 import { useTripItineraryActions } from "@/components/providers/trips-provider"
@@ -41,6 +30,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { buildGoogleExportBatch } from "@/lib/calendar-export"
 import type {
   ItineraryCategory,
   ItineraryStatus,
@@ -49,14 +39,26 @@ import type {
   TripItineraryItem,
 } from "@/lib/trips"
 import {
+  defaultBlockWindow,
   getDateRangeLabel,
   getTripItineraryItems,
-  groupItineraryByDayAndBlock,
+  getTripTimezone,
   normalizeSortOrder,
+  resolveItineraryEndLocal,
+  resolveItineraryStartLocal,
   validateItineraryItemDraft,
 } from "@/lib/trips"
+import {
+  Calendar,
+  Views,
+  dateFnsLocalizer,
+  type SlotInfo,
+  type View,
+} from "react-big-calendar"
+import withDragAndDrop from "react-big-calendar/lib/addons/dragAndDrop"
 
 type StatusFilter = "all" | ItineraryStatus
+type CalendarViewFilter = "month" | "week" | "day" | "agenda"
 
 type ItineraryDraft = {
   title: string
@@ -66,13 +68,34 @@ type ItineraryDraft = {
   status: ItineraryStatus
   category: ItineraryCategory
   notes: string
+  commuteDetails: string
+  locationLink: string
+  googleMapsLink: string
+  startTimeLocal: string
+  endTimeLocal: string
 }
 
-const TIME_BLOCKS: Array<{ key: ItineraryTimeBlock; label: string }> = [
-  { key: "morning", label: "Start Of Day" },
-  { key: "afternoon", label: "Midday Focus" },
-  { key: "evening", label: "Evening Wind-Down" },
-]
+type CalendarEvent = {
+  id: string
+  title: string
+  start: Date
+  end: Date
+  resource: TripItineraryItem
+}
+
+const locales = {
+  "en-US": enUS,
+}
+
+const localizer = dateFnsLocalizer({
+  format,
+  parse,
+  startOfWeek,
+  getDay,
+  locales,
+})
+
+const DnDCalendar = withDragAndDrop<CalendarEvent>(Calendar)
 
 const STATUS_OPTIONS: Array<{ key: ItineraryStatus; label: string }> = [
   { key: "planned", label: "Planned" },
@@ -80,38 +103,24 @@ const STATUS_OPTIONS: Array<{ key: ItineraryStatus; label: string }> = [
   { key: "finished", label: "Finished" },
 ]
 
-const CATEGORY_OPTIONS: Array<{ key: ItineraryCategory; label: string; color: string }> = [
-  { key: "outbound_flight", label: "Outbound Flight", color: "bg-blue-100 text-blue-800 border-blue-200" },
-  { key: "inbound_flight", label: "Inbound Flight", color: "bg-cyan-100 text-cyan-800 border-cyan-200" },
-  { key: "commute", label: "Commute", color: "bg-sky-100 text-sky-800 border-sky-200" },
-  { key: "activities", label: "Activities", color: "bg-emerald-100 text-emerald-800 border-emerald-200" },
-  { key: "games", label: "Games", color: "bg-violet-100 text-violet-800 border-violet-200" },
-  { key: "food", label: "Food", color: "bg-amber-100 text-amber-800 border-amber-200" },
-  { key: "sightseeing", label: "Sightseeing", color: "bg-rose-100 text-rose-800 border-rose-200" },
-  { key: "shopping", label: "Shopping", color: "bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200" },
-  { key: "rest", label: "Rest", color: "bg-slate-100 text-slate-800 border-slate-200" },
-  { key: "other", label: "Other", color: "bg-zinc-100 text-zinc-800 border-zinc-200" },
+const TIME_BLOCKS: Array<{ key: ItineraryTimeBlock; label: string }> = [
+  { key: "morning", label: "Start Of Day" },
+  { key: "afternoon", label: "Midday Focus" },
+  { key: "evening", label: "Evening Wind-Down" },
 ]
 
-function categoryClasses(category: ItineraryCategory): string {
-  return (
-    CATEGORY_OPTIONS.find((option) => option.key === category)?.color ||
-    "bg-zinc-100 text-zinc-800 border-zinc-200"
-  )
-}
-
-function laneId(dayIndex: number, timeBlock: ItineraryTimeBlock): string {
-  return `day-${dayIndex}-block-${timeBlock}`
-}
-
-function parseLaneId(id: string): { dayIndex: number; timeBlock: ItineraryTimeBlock } | null {
-  const match = id.match(/^day-(\d+)-block-(morning|afternoon|evening)$/)
-  if (!match) return null
-  return {
-    dayIndex: Number(match[1]),
-    timeBlock: match[2] as ItineraryTimeBlock,
-  }
-}
+const CATEGORY_OPTIONS: Array<{ key: ItineraryCategory; label: string; className: string }> = [
+  { key: "outbound_flight", label: "Outbound Flight", className: "bg-blue-100 text-blue-900" },
+  { key: "inbound_flight", label: "Inbound Flight", className: "bg-cyan-100 text-cyan-900" },
+  { key: "commute", label: "Commute", className: "bg-sky-100 text-sky-900" },
+  { key: "activities", label: "Activities", className: "bg-emerald-100 text-emerald-900" },
+  { key: "games", label: "Games", className: "bg-violet-100 text-violet-900" },
+  { key: "food", label: "Food", className: "bg-amber-100 text-amber-900" },
+  { key: "sightseeing", label: "Sightseeing", className: "bg-rose-100 text-rose-900" },
+  { key: "shopping", label: "Shopping", className: "bg-fuchsia-100 text-fuchsia-900" },
+  { key: "rest", label: "Rest", className: "bg-slate-100 text-slate-900" },
+  { key: "other", label: "Other", className: "bg-zinc-100 text-zinc-900" },
+]
 
 function randomId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -120,20 +129,74 @@ function randomId(): string {
   return `it-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
-function getLaneItems(
-  items: TripItineraryItem[],
-  dayIndex: number,
-  timeBlock: ItineraryTimeBlock,
-  filter: StatusFilter
-): TripItineraryItem[] {
-  return items
-    .filter(
-      (item) =>
-        item.dayIndex === dayIndex &&
-        item.timeBlock === timeBlock &&
-        (filter === "all" || item.status === filter)
-    )
-    .sort((a, b) => a.sortOrder - b.sortOrder)
+function timeBlockFromDate(date: Date): ItineraryTimeBlock {
+  const hour = date.getHours()
+  if (hour < 12) return "morning"
+  if (hour < 17) return "afternoon"
+  return "evening"
+}
+
+function dateFromLocalString(value?: string): Date | null {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return date
+}
+
+function localInputValueFromDate(date: Date): string {
+  const pad = (num: number) => String(num).padStart(2, "0")
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function dateForTripDay(startDate: string, dayIndex: number): Date {
+  const [year, month, day] = startDate.split("-").map((value) => Number(value))
+  const date = new Date(year, (month || 1) - 1, day || 1, 0, 0, 0, 0)
+  date.setDate(date.getDate() + Math.max(0, dayIndex - 1))
+  return date
+}
+
+function inferDayIndexFromDate(date: Date, trip: Trip): number {
+  const start = dateForTripDay(trip.startDate, 1)
+  const diff = differenceInCalendarDays(date, start) + 1
+  return Math.min(Math.max(1, diff), Math.max(1, trip.totalDays))
+}
+
+function buildDefaultTimes(trip: Trip, dayIndex: number, timeBlock: ItineraryTimeBlock): {
+  startTimeLocal: string
+  endTimeLocal: string
+} {
+  const dayDate = dateForTripDay(trip.startDate, dayIndex)
+  const block = defaultBlockWindow(timeBlock)
+  const start = new Date(dayDate)
+  start.setHours(block.startHour, block.startMinute, 0, 0)
+  const end = new Date(dayDate)
+  end.setHours(block.endHour, block.endMinute, 0, 0)
+  return {
+    startTimeLocal: localInputValueFromDate(start),
+    endTimeLocal: localInputValueFromDate(end),
+  }
+}
+
+function emptyDraft(trip: Trip, dayIndex = 1, timeBlock: ItineraryTimeBlock = "morning"): ItineraryDraft {
+  const defaults = buildDefaultTimes(trip, dayIndex, timeBlock)
+  return {
+    title: "",
+    locationLabel: "",
+    dayIndex,
+    timeBlock,
+    status: "planned",
+    category: "activities",
+    notes: "",
+    commuteDetails: "",
+    locationLink: "",
+    googleMapsLink: "",
+    startTimeLocal: defaults.startTimeLocal,
+    endTimeLocal: defaults.endTimeLocal,
+  }
+}
+
+function categoryClass(category: ItineraryCategory): string {
+  return CATEGORY_OPTIONS.find((option) => option.key === category)?.className ?? "bg-zinc-100 text-zinc-900"
 }
 
 function normalizeForCompare(items: TripItineraryItem[]): string {
@@ -149,331 +212,165 @@ function normalizeForCompare(items: TripItineraryItem[]): string {
         category: item.category,
         title: item.title,
         locationLabel: item.locationLabel,
-        notes: item.notes || "",
+        notes: item.notes ?? "",
+        commuteDetails: item.commuteDetails ?? "",
+        locationLink: item.locationLink ?? "",
+        googleMapsLink: item.googleMapsLink ?? "",
+        startTimeLocal: item.startTimeLocal ?? "",
+        endTimeLocal: item.endTimeLocal ?? "",
         sortOrder: item.sortOrder,
       }))
   )
 }
 
-function statusBadgeVariant(status: ItineraryStatus): "secondary" | "outline" {
-  return status === "finished" ? "secondary" : "outline"
-}
-
-function ItineraryCardBody({
-  item,
-  onEdit,
-  onDelete,
-}: {
-  item: TripItineraryItem
-  onEdit: (item: TripItineraryItem) => void
-  onDelete: (itemId: string) => void
-}) {
-  return (
-    <>
-      <div className="mb-1 flex items-center gap-1">
-        <Badge variant={statusBadgeVariant(item.status)} className="rounded-none text-[10px]">
-          {STATUS_OPTIONS.find((option) => option.key === item.status)?.label || "Planned"}
-        </Badge>
-        <span className={`inline-flex rounded-none border px-1.5 py-0.5 text-[10px] ${categoryClasses(item.category)}`}>
-          {CATEGORY_OPTIONS.find((option) => option.key === item.category)?.label || "Other"}
-        </span>
-      </div>
-
-      <p className="font-medium text-foreground">{item.title}</p>
-      <p className="mt-1 flex items-center gap-1 text-muted-foreground">
-        <MapPinIcon className="size-3" />
-        {item.locationLabel}
-      </p>
-
-      <div className="mt-2 flex gap-2">
-        <Button size="sm" variant="outline" className="h-6 px-2 text-[10px]" onClick={() => onEdit(item)}>
-          Edit
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-6 px-2 text-[10px]"
-          onClick={() => onDelete(item.id)}
-        >
-          <Trash2Icon className="size-3" />
-          Delete
-        </Button>
-      </div>
-    </>
-  )
-}
-
-function applyDrag(
-  items: TripItineraryItem[],
-  activeId: string,
-  overId: string
-): TripItineraryItem[] {
-  const active = items.find((item) => item.id === activeId)
-  if (!active) return items
-
-  let targetDay = active.dayIndex
-  let targetBlock = active.timeBlock
-  let targetIndex = -1
-
-  const parsedLane = parseLaneId(overId)
-  if (parsedLane) {
-    targetDay = parsedLane.dayIndex
-    targetBlock = parsedLane.timeBlock
-    targetIndex = getLaneItems(items, targetDay, targetBlock, "all").length
-  } else {
-    const overItem = items.find((item) => item.id === overId)
-    if (!overItem) return items
-    targetDay = overItem.dayIndex
-    targetBlock = overItem.timeBlock
-    const targetLaneItems = getLaneItems(items, targetDay, targetBlock, "all")
-    targetIndex = targetLaneItems.findIndex((item) => item.id === overItem.id)
-  }
-
-  if (targetIndex < 0) return items
-
-  const sourceLaneAll = getLaneItems(items, active.dayIndex, active.timeBlock, "all")
-  const targetLaneAll = getLaneItems(items, targetDay, targetBlock, "all")
-
-  if (active.dayIndex === targetDay && active.timeBlock === targetBlock) {
-    const fromIndex = sourceLaneAll.findIndex((item) => item.id === activeId)
-    if (fromIndex < 0 || fromIndex === targetIndex) return items
-    const reorderedIds = arrayMove(
-      sourceLaneAll.map((item) => item.id),
-      fromIndex,
-      targetIndex
-    )
-    const updated = items.map((item) => {
-      if (item.dayIndex === active.dayIndex && item.timeBlock === active.timeBlock) {
-        const idx = reorderedIds.indexOf(item.id)
-        if (idx >= 0) return { ...item, sortOrder: (idx + 1) * 10, updatedAt: new Date().toISOString() }
-      }
-      return item
-    })
-    return normalizeSortOrder(updated)
-  }
-
-  const sourceIds = sourceLaneAll.map((item) => item.id).filter((id) => id !== activeId)
-  const targetIds = targetLaneAll.map((item) => item.id).filter((id) => id !== activeId)
-  const insertAt = Math.min(Math.max(0, targetIndex), targetIds.length)
-  targetIds.splice(insertAt, 0, activeId)
-
-  const updated = items.map((item) => {
-    if (item.id === activeId) {
-      return {
-        ...item,
-        dayIndex: targetDay,
-        timeBlock: targetBlock,
-        sortOrder: (insertAt + 1) * 10,
-        updatedAt: new Date().toISOString(),
-      }
-    }
-
-    if (item.dayIndex === active.dayIndex && item.timeBlock === active.timeBlock) {
-      const idx = sourceIds.indexOf(item.id)
-      if (idx >= 0) return { ...item, sortOrder: (idx + 1) * 10, updatedAt: new Date().toISOString() }
-    }
-
-    if (item.dayIndex === targetDay && item.timeBlock === targetBlock) {
-      const idx = targetIds.indexOf(item.id)
-      if (idx >= 0) return { ...item, sortOrder: (idx + 1) * 10, updatedAt: new Date().toISOString() }
-    }
-
-    return item
-  })
-
-  return normalizeSortOrder(updated)
-}
-
-function ItineraryCardItem({
-  item,
-  onEdit,
-  onDelete,
-  disabled,
-}: {
-  item: TripItineraryItem
-  onEdit: (item: TripItineraryItem) => void
-  onDelete: (itemId: string) => void
-  disabled?: boolean
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: item.id,
-    disabled,
-    animateLayoutChanges: defaultAnimateLayoutChanges,
-    transition: {
-      duration: 220,
-      easing: "cubic-bezier(0.25, 1, 0.5, 1)",
-    },
-  })
-
-  const style = {
-    transform: CSS.Transform.toString(transform),
-    transition: transition || "transform 220ms cubic-bezier(0.25, 1, 0.5, 1)",
-  }
-
-  return (
-    <motion.div
-      ref={setNodeRef}
-      layout
-      transition={{ type: "spring", stiffness: 420, damping: 34, mass: 0.55 }}
-      style={style}
-      className={`rounded-none bg-background/90 p-2 text-xs shadow-sm ring-1 ring-border/50 ${isDragging ? "opacity-70" : ""}`}
-    >
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <button
-          type="button"
-          className="text-muted-foreground hover:text-foreground"
-          {...attributes}
-          {...listeners}
-          disabled={disabled}
-          aria-label="Drag itinerary item"
-        >
-          <GripVerticalIcon className="size-3.5" />
-        </button>
-        <span />
-      </div>
-
-      <ItineraryCardBody item={item} onEdit={onEdit} onDelete={onDelete} />
-    </motion.div>
-  )
-}
-
-function ItineraryLane({
-  dayIndex,
-  timeBlock,
-  items,
-  onCreate,
-  onEdit,
-  onDelete,
-  dragDisabled,
-}: {
-  dayIndex: number
-  timeBlock: ItineraryTimeBlock
-  items: TripItineraryItem[]
-  onCreate: (dayIndex: number, timeBlock: ItineraryTimeBlock) => void
-  onEdit: (item: TripItineraryItem) => void
-  onDelete: (itemId: string) => void
-  dragDisabled: boolean
-}) {
-  const id = laneId(dayIndex, timeBlock)
-  const { setNodeRef, isOver } = useDroppable({ id })
-
-  return (
-    <div className="space-y-2 rounded-none bg-muted/10 p-2">
-      <div className="flex items-center justify-end">
-        <Button
-          size="sm"
-          variant="outline"
-          className="h-6 px-2 text-[10px]"
-          onClick={() => onCreate(dayIndex, timeBlock)}
-        >
-          <PlusIcon className="size-3" />
-          Add
-        </Button>
-      </div>
-      <div
-        ref={setNodeRef}
-        className={`min-h-16 space-y-2 rounded-none p-1 transition-colors ${isOver ? "bg-accent/30" : "bg-background/40"}`}
-      >
-        <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
-          {items.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground">No items</p>
-          ) : (
-            items.map((item) => (
-              <ItineraryCardItem
-                key={item.id}
-                item={item}
-                onEdit={onEdit}
-                onDelete={onDelete}
-                disabled={dragDisabled}
-              />
-            ))
-          )}
-        </SortableContext>
-      </div>
-    </div>
-  )
-}
-
 export function ItineraryPageContent({ trip: tripProp }: { trip: Trip }) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const fromContext = useTripPage()
   const trip = fromContext ?? tripProp
+  const timezone = getTripTimezone(trip)
   const { setTripItineraryItems } = useTripItineraryActions()
 
   const persistedItems = React.useMemo(() => getTripItineraryItems(trip), [trip])
   const [draftItems, setDraftItems] = React.useState<TripItineraryItem[]>(persistedItems)
-  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all")
-  const [activeDragId, setActiveDragId] = React.useState<string | null>(null)
+  const [calendarView, setCalendarView] = React.useState<View>(() => {
+    const calendar = searchParams.get("calendar")
+    if (calendar === "month") return Views.MONTH
+    if (calendar === "day") return Views.DAY
+    if (calendar === "agenda") return Views.AGENDA
+    return Views.WEEK
+  })
+  const [statusFilter, setStatusFilter] = React.useState<StatusFilter>(() => {
+    const status = searchParams.get("status")
+    if (status === "planned" || status === "todo" || status === "finished") return status
+    return "all"
+  })
 
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [editingId, setEditingId] = React.useState<string | null>(null)
-  const [form, setForm] = React.useState<ItineraryDraft>({
-    title: "",
-    locationLabel: "",
-    dayIndex: 1,
-    timeBlock: "morning",
-    status: "planned",
-    category: "activities",
-    notes: "",
-  })
-
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+  const [form, setForm] = React.useState<ItineraryDraft>(emptyDraft(trip, 1, "morning"))
+  const [copyLinksOpen, setCopyLinksOpen] = React.useState(false)
+  const [exportLinks, setExportLinks] = React.useState<string[]>([])
 
   React.useEffect(() => {
     setDraftItems(persistedItems)
   }, [persistedItems])
+
+  const syncQueryState = React.useCallback(
+    (nextView: View, nextStatus: StatusFilter) => {
+      const params = new URLSearchParams(searchParams.toString())
+      params.delete("tab")
+      const calendarParam: CalendarViewFilter =
+        nextView === Views.MONTH
+          ? "month"
+          : nextView === Views.DAY
+            ? "day"
+            : nextView === Views.AGENDA
+              ? "agenda"
+              : "week"
+      params.set("calendar", calendarParam)
+      params.set("status", nextStatus)
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false })
+    },
+    [pathname, router, searchParams]
+  )
+
+  const handleCalendarViewChange = React.useCallback(
+    (nextView: View) => {
+      setCalendarView(nextView)
+      syncQueryState(nextView, statusFilter)
+    },
+    [statusFilter, syncQueryState]
+  )
+
+  const handleStatusFilterChange = React.useCallback(
+    (nextStatus: StatusFilter) => {
+      setStatusFilter(nextStatus)
+      syncQueryState(calendarView, nextStatus)
+    },
+    [calendarView, syncQueryState]
+  )
+
+  React.useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    const calendarParam: CalendarViewFilter =
+      calendarView === Views.MONTH
+        ? "month"
+        : calendarView === Views.DAY
+          ? "day"
+          : calendarView === Views.AGENDA
+            ? "agenda"
+            : "week"
+    params.delete("tab")
+    params.set("calendar", calendarParam)
+    params.set("status", statusFilter)
+    const next = `${pathname}?${params.toString()}`
+    const current = `${pathname}?${searchParams.toString()}`
+    if (next !== current) router.replace(next, { scroll: false })
+  }, [calendarView, pathname, router, searchParams, statusFilter])
 
   const isDirty = React.useMemo(
     () => normalizeForCompare(draftItems) !== normalizeForCompare(persistedItems),
     [draftItems, persistedItems]
   )
 
-  React.useEffect(() => {
-    if (!isDirty) return
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-      event.returnValue = ""
-    }
-    window.addEventListener("beforeunload", beforeUnload)
-    return () => window.removeEventListener("beforeunload", beforeUnload)
-  }, [isDirty])
-
   const dayNumbers = React.useMemo(
     () => Array.from({ length: Math.max(1, trip.totalDays) }, (_, index) => index + 1),
     [trip.totalDays]
   )
 
-  const grouped = React.useMemo(
-    () => groupItineraryByDayAndBlock(draftItems, trip.totalDays),
-    [draftItems, trip.totalDays]
+  const calendarEvents = React.useMemo<CalendarEvent[]>(
+    () =>
+      draftItems
+        .filter((item) => statusFilter === "all" || item.status === statusFilter)
+        .map((item) => {
+          const start = dateFromLocalString(resolveItineraryStartLocal(item, trip))
+          const end = dateFromLocalString(resolveItineraryEndLocal(item, trip))
+          if (!start || !end) return null
+          const safeEnd = end > start ? end : addMinutes(start, 60)
+          return {
+            id: item.id,
+            title: item.title,
+            start,
+            end: safeEnd,
+            resource: item,
+          }
+        })
+        .filter((event): event is CalendarEvent => Boolean(event)),
+    [draftItems, statusFilter, trip]
   )
 
-  const openCreateDialog = React.useCallback((dayIndex = 1, timeBlock: ItineraryTimeBlock = "morning") => {
-    setEditingId(null)
-    setForm({
-      title: "",
-      locationLabel: "",
-      dayIndex,
-      timeBlock,
-      status: "planned",
-      category: "activities",
-      notes: "",
-    })
-    setDialogOpen(true)
-  }, [])
+  const openCreateDialog = React.useCallback(
+    (dayIndex = 1, timeBlock: ItineraryTimeBlock = "morning") => {
+      setEditingId(null)
+      setForm(emptyDraft(trip, dayIndex, timeBlock))
+      setDialogOpen(true)
+    },
+    [trip]
+  )
 
-  const openEditDialog = React.useCallback((item: TripItineraryItem) => {
-    setEditingId(item.id)
-    setForm({
-      title: item.title,
-      locationLabel: item.locationLabel,
-      dayIndex: item.dayIndex,
-      timeBlock: item.timeBlock,
-      status: item.status,
-      category: item.category,
-      notes: item.notes || "",
-    })
-    setDialogOpen(true)
-  }, [])
+  const openEditDialog = React.useCallback(
+    (item: TripItineraryItem) => {
+      setEditingId(item.id)
+      setForm({
+        title: item.title,
+        locationLabel: item.locationLabel,
+        dayIndex: item.dayIndex,
+        timeBlock: item.timeBlock,
+        status: item.status,
+        category: item.category,
+        notes: item.notes ?? "",
+        commuteDetails: item.commuteDetails ?? "",
+        locationLink: item.locationLink ?? "",
+        googleMapsLink: item.googleMapsLink ?? "",
+        startTimeLocal: resolveItineraryStartLocal(item, trip),
+        endTimeLocal: resolveItineraryEndLocal(item, trip),
+      })
+      setDialogOpen(true)
+    },
+    [trip]
+  )
 
   const upsertDraftItem = React.useCallback(() => {
     const validation = validateItineraryItemDraft(
@@ -489,6 +386,15 @@ export function ItineraryPageContent({ trip: tripProp }: { trip: Trip }) {
       return
     }
 
+    const startDate = dateFromLocalString(form.startTimeLocal)
+    const endDate = dateFromLocalString(form.endTimeLocal)
+    if (!startDate || !endDate || endDate <= startDate) {
+      toast.error("End time must be after start time.")
+      return
+    }
+
+    const inferredDay = inferDayIndexFromDate(startDate, trip)
+    const inferredBlock = timeBlockFromDate(startDate)
     const now = new Date().toISOString()
 
     setDraftItems((prev) => {
@@ -500,13 +406,16 @@ export function ItineraryPageContent({ trip: tripProp }: { trip: Trip }) {
                   ...item,
                   title: form.title.trim(),
                   locationLabel: form.locationLabel.trim(),
-                  dayIndex: form.dayIndex,
-                  timeBlock: form.timeBlock,
+                  dayIndex: inferredDay,
+                  timeBlock: inferredBlock,
                   status: form.status,
                   category: form.category,
                   notes: form.notes.trim() || undefined,
-                  startTimeLocal: undefined,
-                  endTimeLocal: undefined,
+                  commuteDetails: form.commuteDetails.trim() || undefined,
+                  locationLink: form.locationLink.trim() || undefined,
+                  googleMapsLink: form.googleMapsLink.trim() || undefined,
+                  startTimeLocal: form.startTimeLocal,
+                  endTimeLocal: form.endTimeLocal,
                   updatedAt: now,
                 }
               : item
@@ -514,32 +423,36 @@ export function ItineraryPageContent({ trip: tripProp }: { trip: Trip }) {
         )
       }
 
-      const laneItems = getLaneItems(prev, form.dayIndex, form.timeBlock, "all")
       const nextItem: TripItineraryItem = {
         id: randomId(),
         tripId: trip.id,
-        dayIndex: form.dayIndex,
-        timeBlock: form.timeBlock,
+        dayIndex: inferredDay,
+        timeBlock: inferredBlock,
         status: form.status,
         category: form.category,
         title: form.title.trim(),
         locationLabel: form.locationLabel.trim(),
         notes: form.notes.trim() || undefined,
-        startTimeLocal: undefined,
-        endTimeLocal: undefined,
-        sortOrder: (laneItems.length + 1) * 10,
+        commuteDetails: form.commuteDetails.trim() || undefined,
+        locationLink: form.locationLink.trim() || undefined,
+        googleMapsLink: form.googleMapsLink.trim() || undefined,
+        startTimeLocal: form.startTimeLocal,
+        endTimeLocal: form.endTimeLocal,
+        sortOrder: 9999,
         createdAt: now,
         updatedAt: now,
       }
+
       return normalizeSortOrder([...prev, nextItem])
     })
 
     setDialogOpen(false)
     setEditingId(null)
-  }, [editingId, form, trip.id, trip.totalDays])
+  }, [editingId, form, trip])
 
-  const handleDelete = React.useCallback((itemId: string) => {
+  const handleDeleteItem = React.useCallback((itemId: string) => {
     setDraftItems((prev) => normalizeSortOrder(prev.filter((item) => item.id !== itemId)))
+    toast.message("Item removed from draft.")
   }, [])
 
   const handleSave = React.useCallback(() => {
@@ -559,73 +472,168 @@ export function ItineraryPageContent({ trip: tripProp }: { trip: Trip }) {
     }
 
     setTripItineraryItems(trip.id, normalizeSortOrder(draftItems))
-    toast.success("Itinerary changes saved.")
+    toast.success("Itinerary saved.")
   }, [draftItems, setTripItineraryItems, trip.id, trip.totalDays])
 
   const handleDiscard = React.useCallback(() => {
     setDraftItems(persistedItems)
-    toast.message("Unsaved itinerary changes discarded.")
+    toast.message("Unsaved changes discarded.")
   }, [persistedItems])
 
-  const onDragEnd = React.useCallback(
-    (event: DragEndEvent) => {
-      setActiveDragId(null)
-      if (statusFilter !== "all") return
-      const activeId = String(event.active.id)
-      const overId = event.over ? String(event.over.id) : ""
-      if (!activeId || !overId || activeId === overId) return
+  const handleCalendarEventDrop = React.useCallback(
+    ({ event, start, end }: { event: CalendarEvent; start: Date | string; end: Date | string }) => {
+      const nextStart = start instanceof Date ? start : new Date(start)
+      const nextEnd = end instanceof Date ? end : new Date(end)
+      if (Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime())) return
 
-      setDraftItems((prev) => applyDrag(prev, activeId, overId))
+      const dayIndex = inferDayIndexFromDate(nextStart, trip)
+      const timeBlock = timeBlockFromDate(nextStart)
+      setDraftItems((prev) =>
+        normalizeSortOrder(
+          prev.map((item) =>
+            item.id === event.resource.id
+              ? {
+                  ...item,
+                  dayIndex,
+                  timeBlock,
+                  startTimeLocal: localInputValueFromDate(nextStart),
+                  endTimeLocal: localInputValueFromDate(nextEnd),
+                  updatedAt: new Date().toISOString(),
+                }
+              : item
+          )
+        )
+      )
     },
-    [statusFilter]
+    [trip]
   )
 
-  const onDragStart = React.useCallback((event: DragStartEvent) => {
-    setActiveDragId(String(event.active.id))
-  }, [])
+  const handleCalendarEventResize = React.useCallback(
+    ({ event, start, end }: { event: CalendarEvent; start: Date | string; end: Date | string }) => {
+      const nextStart = start instanceof Date ? start : new Date(start)
+      const nextEnd = end instanceof Date ? end : new Date(end)
+      if (Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime())) return
 
-  const onDragCancel = React.useCallback((_event: DragCancelEvent) => {
-    setActiveDragId(null)
-  }, [])
-
-  const activeDragItem = React.useMemo(
-    () => draftItems.find((item) => item.id === activeDragId) ?? null,
-    [activeDragId, draftItems]
+      const dayIndex = inferDayIndexFromDate(nextStart, trip)
+      const timeBlock = timeBlockFromDate(nextStart)
+      setDraftItems((prev) =>
+        normalizeSortOrder(
+          prev.map((item) =>
+            item.id === event.resource.id
+              ? {
+                  ...item,
+                  dayIndex,
+                  timeBlock,
+                  startTimeLocal: localInputValueFromDate(nextStart),
+                  endTimeLocal: localInputValueFromDate(nextEnd),
+                  updatedAt: new Date().toISOString(),
+                }
+              : item
+          )
+        )
+      )
+    },
+    [trip]
   )
+
+  const handleCalendarSelectSlot = React.useCallback(
+    (slot: SlotInfo) => {
+      if (!(slot.start instanceof Date) || !(slot.end instanceof Date)) return
+      const dayIndex = inferDayIndexFromDate(slot.start, trip)
+      const timeBlock = timeBlockFromDate(slot.start)
+      setEditingId(null)
+      setForm({
+        ...emptyDraft(trip, dayIndex, timeBlock),
+        dayIndex,
+        timeBlock,
+        startTimeLocal: localInputValueFromDate(slot.start),
+        endTimeLocal: localInputValueFromDate(slot.end),
+      })
+      setDialogOpen(true)
+    },
+    [trip]
+  )
+
+  const handleExportGoogle = React.useCallback(() => {
+    const allItems = normalizeSortOrder(draftItems)
+    if (allItems.length === 0) {
+      toast.error("No itinerary items to export.")
+      return
+    }
+
+    const links = buildGoogleExportBatch(allItems, trip)
+    const first = window.open(links[0], "_blank")
+    if (!first) {
+      setExportLinks(links)
+      setCopyLinksOpen(true)
+      toast.error("Popup blocked. Use the links panel to export all events.")
+      return
+    }
+
+    links.slice(1).forEach((url, index) => {
+      window.setTimeout(() => {
+        window.open(url, "_blank")
+      }, (index + 1) * 280)
+    })
+
+    toast.success(`Opened export for ${allItems.length} events.`)
+  }, [draftItems, trip])
 
   return (
-    <div className="space-y-4 overflow-x-hidden">
-      <Card>
+    <div className="space-y-4">
+      <Card className="border-0 shadow-none">
         <CardHeader>
-          <CardTitle>Itinerary Board</CardTitle>
+          <CardTitle>Itinerary Planner</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <p className="flex items-center gap-1 text-muted-foreground">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+            <p className="flex items-center gap-1">
               <CalendarDaysIcon className="size-3.5" />
-              {trip.totalDays} days • {getDateRangeLabel(trip)}
+              {trip.totalDays} days • {getDateRangeLabel(trip)} • {timezone}
             </p>
-            <div className="flex flex-wrap items-center gap-2">
-              {isDirty && <Badge variant="outline" className="rounded-none">Unsaved changes</Badge>}
-              <Button variant="outline" size="sm" onClick={() => openCreateDialog(1, "morning")}>
-                <PlusIcon /> Add Item
-              </Button>
+            <div className="flex items-center gap-2">
+              {isDirty ? <Badge variant="outline">Unsaved changes</Badge> : null}
               <Button variant="outline" size="sm" onClick={handleDiscard} disabled={!isDirty}>
-                Discard Changes
+                Discard
               </Button>
               <Button size="sm" onClick={handleSave} disabled={!isDirty}>
-                <SaveIcon /> Save Changes
+                <SaveIcon />
+                Save Changes
               </Button>
             </div>
           </div>
 
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => openCreateDialog(1, "morning")}>
+                <PlusIcon />
+                Add Item
+              </Button>
+              <Button size="sm" variant="outline" onClick={handleExportGoogle}>
+                <ExternalLinkIcon />
+                Export All Events
+              </Button>
+              {draftItems.length > 0 ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setExportLinks(buildGoogleExportBatch(normalizeSortOrder(draftItems), trip))
+                    setCopyLinksOpen(true)
+                  }}
+                >
+                  Copy Event Links
+                </Button>
+              ) : null}
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground">Status:</span>
+            <span className="text-xs text-muted-foreground">Status</span>
             <Button
               size="sm"
               variant={statusFilter === "all" ? "secondary" : "outline"}
-              className="rounded-none"
-              onClick={() => setStatusFilter("all")}
+              onClick={() => handleStatusFilterChange("all")}
             >
               All
             </Button>
@@ -634,128 +642,141 @@ export function ItineraryPageContent({ trip: tripProp }: { trip: Trip }) {
                 key={status.key}
                 size="sm"
                 variant={statusFilter === status.key ? "secondary" : "outline"}
-                className="rounded-none"
-                onClick={() => setStatusFilter(status.key)}
+                onClick={() => handleStatusFilterChange(status.key)}
               >
                 {status.label}
               </Button>
             ))}
           </div>
 
-          <div className="space-y-1">
-            <p className="text-xs text-muted-foreground">Legend</p>
-            <div className="flex flex-wrap gap-1">
-              {CATEGORY_OPTIONS.map((category) => (
-                <span
-                  key={category.key}
-                  className={`inline-flex rounded-none border px-1.5 py-0.5 text-[10px] ${category.color}`}
-                >
-                  {category.label}
-                </span>
-              ))}
-            </div>
-            <p className="text-[11px] text-muted-foreground">Use flight tags for travel days: Outbound Flight and Inbound Flight.</p>
+          <div className="flex flex-wrap gap-1">
+            {CATEGORY_OPTIONS.map((category) => (
+              <span key={category.key} className={`inline-flex rounded px-1.5 py-0.5 text-[10px] ${category.className}`}>
+                {category.label}
+              </span>
+            ))}
           </div>
-
-          {statusFilter !== "all" && (
-            <p className="text-xs text-muted-foreground">
-              Drag reorder is disabled while status filter is active.
-            </p>
-          )}
         </CardContent>
       </Card>
 
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCorners}
-        onDragStart={onDragStart}
-        onDragCancel={onDragCancel}
-        onDragEnd={onDragEnd}
-      >
-        <div className="grid gap-3 pb-2 sm:grid-cols-2 xl:grid-cols-3">
-          {dayNumbers.map((day) => (
-            <section key={`day-${day}`} className="rounded-none bg-card/70 p-3 ring-1 ring-border/50">
-              <h3 className="mb-2 text-sm font-semibold">Day {day}</h3>
-              <div className="space-y-3">
-                {TIME_BLOCKS.map((block) => (
-                  <div key={`${day}-${block.key}`} className="space-y-1">
-                    <div className="border-b pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-                      {block.label}
+      <Card className="border-0 shadow-none">
+        <CardContent className="space-y-3 pt-4">
+          <div className="rounded-md bg-muted/20 p-2">
+            {calendarView === Views.AGENDA ? (
+              <Calendar
+                localizer={localizer}
+                events={calendarEvents}
+                view={calendarView}
+                onView={handleCalendarViewChange}
+                defaultDate={dateForTripDay(trip.startDate, 1)}
+                startAccessor="start"
+                endAccessor="end"
+                style={{ height: 780 }}
+                popup
+                onSelectEvent={(event) => openEditDialog(event.resource)}
+                eventPropGetter={(event) => ({
+                  className: `border-0 ${categoryClass(event.resource.category)} text-[11px]`,
+                })}
+              />
+            ) : (
+              <DnDCalendar
+                localizer={localizer}
+                events={calendarEvents}
+                view={calendarView}
+                onView={handleCalendarViewChange}
+                defaultDate={dateForTripDay(trip.startDate, 1)}
+                startAccessor="start"
+                endAccessor="end"
+                style={{ height: 780 }}
+                selectable
+                resizable
+                popup
+                onSelectEvent={(event) => openEditDialog(event.resource)}
+                onSelectSlot={handleCalendarSelectSlot}
+                onEventDrop={handleCalendarEventDrop}
+                onEventResize={handleCalendarEventResize}
+                eventPropGetter={(event) => ({
+                  className: `border-0 ${categoryClass(event.resource.category)} text-[11px]`,
+                })}
+              />
+            )}
+          </div>
+
+          <div className="rounded-md bg-muted/20 p-2">
+            <p className="mb-2 text-sm font-medium">Current Items</p>
+            <div className="space-y-2">
+              {normalizeSortOrder(draftItems).map((item) => (
+                <div key={item.id} className="rounded bg-background p-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-medium">{item.title}</p>
+                      <p className="text-xs text-muted-foreground">{item.locationLabel}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {resolveItineraryStartLocal(item, trip)} - {resolveItineraryEndLocal(item, trip)}
+                      </p>
                     </div>
-                    <ItineraryLane
-                      dayIndex={day}
-                      timeBlock={block.key}
-                      items={getLaneItems(grouped[day]?.[block.key] ?? [], day, block.key, statusFilter)}
-                      onCreate={openCreateDialog}
-                      onEdit={openEditDialog}
-                      onDelete={handleDelete}
-                      dragDisabled={statusFilter !== "all"}
-                    />
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline">{item.status}</Badge>
+                      <Button size="sm" variant="outline" onClick={() => openEditDialog(item)}>
+                        Edit
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => handleDeleteItem(item.id)}>
+                        <Trash2Icon className="size-3" />
+                        Delete
+                      </Button>
+                    </div>
                   </div>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-
-        <DragOverlay dropAnimation={{ duration: 220, easing: "cubic-bezier(0.25, 1, 0.5, 1)" }} zIndex={20}>
-          {activeDragItem ? (
-            <motion.div
-              initial={{ scale: 0.98, opacity: 0.95 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="w-[290px] rounded-none border bg-background p-2 text-xs shadow-lg"
-            >
-              <ItineraryCardBody item={activeDragItem} onEdit={() => {}} onDelete={() => {}} />
-            </motion.div>
-          ) : null}
-        </DragOverlay>
-      </DndContext>
-
-      {draftItems.length === 0 && (
-        <Card>
-          <CardContent className="py-6 text-center text-sm text-muted-foreground">
-            No itinerary items yet. Add your first Morning, Afternoon, or Evening block.
-          </CardContent>
-        </Card>
-      )}
+                </div>
+              ))}
+              {draftItems.length === 0 ? (
+                <p className="text-xs text-muted-foreground">No itinerary items yet.</p>
+              ) : null}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{editingId ? "Edit Itinerary Item" : "Add Itinerary Item"}</DialogTitle>
+            <DialogTitle>{editingId ? "Edit itinerary item" : "Add itinerary item"}</DialogTitle>
             <DialogDescription>
-              Title and location are required. Day and time block determine where this card appears.
+              Title and location are required. Times drive day/block mapping automatically.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <label className="text-xs font-medium">Title</label>
-              <Input
-                value={form.title}
-                onChange={(event) => setForm((prev) => ({ ...prev, title: event.target.value }))}
-                placeholder="Visit museum"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium">Location</label>
-              <Input
-                value={form.locationLabel}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, locationLabel: event.target.value }))
-                }
-                placeholder="Berlin Cathedral"
-              />
+          <div className="grid gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Title</label>
+                <Input
+                  value={form.title}
+                  onChange={(event) => setForm((prev) => ({ ...prev, title: event.target.value }))}
+                  placeholder="Berlin Core Sights"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Location</label>
+                <Input
+                  value={form.locationLabel}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, locationLabel: event.target.value }))
+                  }
+                  placeholder="Berlin, Germany"
+                />
+              </div>
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-4">
+            <div className="grid gap-3 sm:grid-cols-4">
               <div className="space-y-1">
                 <label className="text-xs font-medium">Day</label>
                 <Select
                   value={String(form.dayIndex)}
-                  onValueChange={(value) =>
-                    setForm((prev) => ({ ...prev, dayIndex: Number(value) }))
-                  }
+                  onValueChange={(value) => {
+                    const dayIndex = Number(value)
+                    const defaults = buildDefaultTimes(trip, dayIndex, form.timeBlock)
+                    setForm((prev) => ({ ...prev, dayIndex, ...defaults }))
+                  }}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Day" />
@@ -774,9 +795,11 @@ export function ItineraryPageContent({ trip: tripProp }: { trip: Trip }) {
                 <label className="text-xs font-medium">Time block</label>
                 <Select
                   value={form.timeBlock}
-                  onValueChange={(value) =>
-                    setForm((prev) => ({ ...prev, timeBlock: value as ItineraryTimeBlock }))
-                  }
+                  onValueChange={(value) => {
+                    const timeBlock = value as ItineraryTimeBlock
+                    const defaults = buildDefaultTimes(trip, form.dayIndex, timeBlock)
+                    setForm((prev) => ({ ...prev, timeBlock, ...defaults }))
+                  }}
                 >
                   <SelectTrigger className="w-full">
                     <SelectValue placeholder="Time block" />
@@ -834,14 +857,86 @@ export function ItineraryPageContent({ trip: tripProp }: { trip: Trip }) {
               </div>
             </div>
 
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Start time</label>
+                <Input
+                  type="datetime-local"
+                  value={form.startTimeLocal}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, startTimeLocal: event.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">End time</label>
+                <Input
+                  type="datetime-local"
+                  value={form.endTimeLocal}
+                  onChange={(event) => setForm((prev) => ({ ...prev, endTimeLocal: event.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Location Link (optional)</label>
+                <Input
+                  value={form.locationLink}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, locationLink: event.target.value }))
+                  }
+                  placeholder="https://example.com/location"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium">Google Maps Link (optional)</label>
+                <Input
+                  value={form.googleMapsLink}
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, googleMapsLink: event.target.value }))
+                  }
+                  placeholder="https://maps.google.com/..."
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-xs font-medium">Commuting Details (optional)</label>
+              <Input
+                value={form.commuteDetails}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, commuteDetails: event.target.value }))
+                }
+                placeholder="ICE 726, 07:42 to 11:02"
+              />
+            </div>
+
             <div className="space-y-1">
               <label className="text-xs font-medium">Notes (optional)</label>
               <Textarea
                 value={form.notes}
                 onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
-                placeholder="Tickets required, 30 min queue"
+                placeholder="Tickets required, expected queue, reminders"
               />
             </div>
+
+            {(form.locationLink || form.googleMapsLink) && (
+              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                {form.locationLink ? (
+                  <a href={form.locationLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline">
+                    <LinkIcon className="size-3" />
+                    Location link
+                  </a>
+                ) : null}
+                {form.googleMapsLink ? (
+                  <a href={form.googleMapsLink} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 underline">
+                    <ExternalLinkIcon className="size-3" />
+                    Google Maps
+                  </a>
+                ) : null}
+              </div>
+            )}
           </div>
 
           <DialogFooter>
@@ -849,6 +944,50 @@ export function ItineraryPageContent({ trip: tripProp }: { trip: Trip }) {
               Cancel
             </Button>
             <Button onClick={upsertDraftItem}>{editingId ? "Update item" : "Add item"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={copyLinksOpen} onOpenChange={setCopyLinksOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Google Calendar Event Links</DialogTitle>
+            <DialogDescription>
+              Use these links if your browser blocks popup windows.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-72 space-y-2 overflow-y-auto rounded-md bg-muted/20 p-2">
+            {exportLinks.map((link, index) => {
+              const item = draftItems[index]
+              return (
+                <div key={link} className="rounded bg-background p-2">
+                  <p className="mb-1 text-xs font-medium">{item?.title ?? `Event ${index + 1}`}</p>
+                  <p className="truncate text-xs text-muted-foreground">{link}</p>
+                  <div className="mt-2 flex gap-2">
+                    <Button size="sm" variant="outline" asChild>
+                      <a href={link} target="_blank" rel="noreferrer">
+                        Open
+                      </a>
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(link)
+                        toast.success("Event link copied.")
+                      }}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCopyLinksOpen(false)}>
+              Close
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

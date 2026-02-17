@@ -252,10 +252,24 @@ export function ItineraryPageContent({ trip: tripProp }: { trip: Trip }) {
   const [form, setForm] = React.useState<ItineraryDraft>(emptyDraft(trip, 1, "morning"))
   const [copyLinksOpen, setCopyLinksOpen] = React.useState(false)
   const [exportLinks, setExportLinks] = React.useState<string[]>([])
+  const [isMobile, setIsMobile] = React.useState(false)
 
   React.useEffect(() => {
     setDraftItems(persistedItems)
   }, [persistedItems])
+
+  React.useEffect(() => {
+    const evaluate = () => setIsMobile(window.innerWidth < 768)
+    evaluate()
+    window.addEventListener("resize", evaluate)
+    return () => window.removeEventListener("resize", evaluate)
+  }, [])
+
+  React.useEffect(() => {
+    if (isMobile && calendarView !== Views.DAY) {
+      setCalendarView(Views.DAY)
+    }
+  }, [calendarView, isMobile])
 
   const syncQueryState = React.useCallback(
     (nextView: View, nextStatus: StatusFilter) => {
@@ -278,10 +292,11 @@ export function ItineraryPageContent({ trip: tripProp }: { trip: Trip }) {
 
   const handleCalendarViewChange = React.useCallback(
     (nextView: View) => {
-      setCalendarView(nextView)
-      syncQueryState(nextView, statusFilter)
+      const safeView = isMobile && nextView !== Views.DAY ? Views.DAY : nextView
+      setCalendarView(safeView)
+      syncQueryState(safeView, statusFilter)
     },
-    [statusFilter, syncQueryState]
+    [isMobile, statusFilter, syncQueryState]
   )
 
   const handleStatusFilterChange = React.useCallback(
@@ -668,10 +683,11 @@ export function ItineraryPageContent({ trip: tripProp }: { trip: Trip }) {
                 events={calendarEvents}
                 view={calendarView}
                 onView={handleCalendarViewChange}
+                views={isMobile ? [Views.DAY, Views.AGENDA] : [Views.MONTH, Views.WEEK, Views.DAY, Views.AGENDA]}
                 defaultDate={dateForTripDay(trip.startDate, 1)}
                 startAccessor="start"
                 endAccessor="end"
-                style={{ height: 780 }}
+                style={{ height: isMobile ? 520 : 780 }}
                 popup
                 onSelectEvent={(event) => openEditDialog(event.resource)}
                 eventPropGetter={(event) => ({
@@ -684,10 +700,11 @@ export function ItineraryPageContent({ trip: tripProp }: { trip: Trip }) {
                 events={calendarEvents}
                 view={calendarView}
                 onView={handleCalendarViewChange}
+                views={isMobile ? [Views.DAY, Views.AGENDA] : [Views.MONTH, Views.WEEK, Views.DAY, Views.AGENDA]}
                 defaultDate={dateForTripDay(trip.startDate, 1)}
                 startAccessor="start"
                 endAccessor="end"
-                style={{ height: 780 }}
+                style={{ height: isMobile ? 520 : 780 }}
                 selectable
                 resizable
                 popup

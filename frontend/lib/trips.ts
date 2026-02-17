@@ -70,6 +70,9 @@ export type TripItineraryItem = {
   placeId?: string
   lat?: number
   lng?: number
+  locationLink?: string
+  googleMapsLink?: string
+  commuteDetails?: string
   notes?: string
   startTimeLocal?: string
   endTimeLocal?: string
@@ -125,6 +128,7 @@ export type TripFinance = {
 export type Trip = {
   id: string
   destination: string
+  timezone?: string
   startDate: string
   endDate: string
   travelers: number
@@ -183,6 +187,7 @@ const trips: Trip[] = [
   {
     id: "germany-spring",
     destination: "Germany",
+    timezone: "Europe/Berlin",
     startDate: "2026-04-24",
     endDate: "2026-05-04",
     travelers: 1,
@@ -259,7 +264,12 @@ const trips: Trip[] = [
         category: "commute",
         title: "Train: Berlin → Dresden (IC 2173)",
         locationLabel: "Berlin Hbf to Dresden-Neustadt",
-        notes: "Dep 08:26, Arr 10:21, about 2h.",
+        commuteDetails:
+          "15 Euro • Journey on Mo. 27.04.2026 • Berlin Hbf 08:26 (IC 2173) → Dresden-Neustadt 10:21 Pl. 8 (IC 2173).",
+        locationLink: "https://int.bahn.de/en/buchung/start?vbid=aee9f479-8408-4643-bb27-7239b3ad8a57",
+        notes: "Journey on Mo. 27.04.2026 with IC 2173.",
+        startTimeLocal: "2026-04-27T08:26",
+        endTimeLocal: "2026-04-27T10:21",
         sortOrder: 10,
         createdAt: "2026-02-14T08:04:00.000Z",
         updatedAt: "2026-02-14T08:04:00.000Z",
@@ -300,7 +310,8 @@ const trips: Trip[] = [
         category: "commute",
         title: "Dresden → Bad Schandau",
         locationLabel: "Saxon Switzerland",
-        notes: "About 30 min train each way.",
+        commuteDetails: "Approx 30 min train each way.",
+        notes: "Dresden → Bad Schandau (~30 min).",
         sortOrder: 10,
         createdAt: "2026-02-14T08:07:00.000Z",
         updatedAt: "2026-02-14T08:07:00.000Z",
@@ -341,7 +352,13 @@ const trips: Trip[] = [
         category: "commute",
         title: "Day Trip: Dresden → Prague",
         locationLabel: "Flixbus",
-        notes: "About 2h bus each direction.",
+        commuteDetails:
+          "FlixBus direct • Wed Apr 29 • Dresden central station (Bayrische Straße) 07:20 a.m. → Prague (Central Bus Station Florenc) 09:10 a.m.",
+        locationLink:
+          "https://shop.flixbus.ca/search?departureCity=40db219f-8646-11e6-9066-549f350fcb0c&arrivalCity=40de1ad1-8646-11e6-9066-549f350fcb0c&route=Dresden-Prague&rideDate=29.04.2026&backRideDate=29.04.2026&adult=2&_locale=en_CA&departureCountryCode=DE&arrivalCountryCode=CZ&backRide=1&features[feature.enable_distribusion]=1&features[feature.train_cities_only]=0&features[feature.station_search]=0&features[feature.station_search_recommendation]=0&features[feature.darken_page]=1&utm_source=google&utm_medium=sea-brand&utm_campaign=3799800904.22108745965_177093320550.728430739660_aud-2117685796929:kwd-46934810167_9000847__&utm_term=flixbus&utm_content=ca.flixbus&gad_source=1&gclid=Cj0KCQiAhaHMBhD2ARIsAPAU_D58mjDrlJDJvrOp2GjwrUcoDjlYVbp11ST67WjET-oAdC2ucuWOMDMaAncOEALw_wcB&atb_pdid=bc346e6e-1be5-4475-b230-0eca784d1d10&_sp=f9e6c53f-82e0-4ff9-acc2-3242cad532d9&_spnuid=b6e5ff34-bd85-4f65-a5da-1489ddb31f25_1770601891210",
+        notes: "Booking total incl. VAT: CA$81.95 (Outbound 2 adults: CA$37.98, Return 2 adults: CA$39.98, Service fee: CA$3.99).",
+        startTimeLocal: "2026-04-29T07:20",
+        endTimeLocal: "2026-04-29T09:10",
         sortOrder: 10,
         createdAt: "2026-02-14T08:10:00.000Z",
         updatedAt: "2026-02-14T08:10:00.000Z",
@@ -369,7 +386,13 @@ const trips: Trip[] = [
         category: "commute",
         title: "Prague → Dresden Return",
         locationLabel: "Flixbus",
-        notes: "Check logistics for commute windows.",
+        commuteDetails:
+          "FlixBus direct • Wed Apr 29 • Prague (Central Bus Station Florenc) 09:30 p.m. → Dresden central station (Bayrische Straße) 11:25 p.m.",
+        locationLink:
+          "https://shop.flixbus.ca/search?departureCity=40db219f-8646-11e6-9066-549f350fcb0c&arrivalCity=40de1ad1-8646-11e6-9066-549f350fcb0c&route=Dresden-Prague&rideDate=29.04.2026&backRideDate=29.04.2026&adult=2&_locale=en_CA&departureCountryCode=DE&arrivalCountryCode=CZ&backRide=1&features[feature.enable_distribusion]=1&features[feature.train_cities_only]=0&features[feature.station_search]=0&features[feature.station_search_recommendation]=0&features[feature.darken_page]=1&utm_source=google&utm_medium=sea-brand&utm_campaign=3799800904.22108745965_177093320550.728430739660_aud-2117685796929:kwd-46934810167_9000847__&utm_term=flixbus&utm_content=ca.flixbus&gad_source=1&gclid=Cj0KCQiAhaHMBhD2ARIsAPAU_D58mjDrlJDJvrOp2GjwrUcoDjlYVbp11ST67WjET-oAdC2ucuWOMDMaAncOEALw_wcB&atb_pdid=bc346e6e-1be5-4475-b230-0eca784d1d10&_sp=f9e6c53f-82e0-4ff9-acc2-3242cad532d9&_spnuid=b6e5ff34-bd85-4f65-a5da-1489ddb31f25_1770601891210",
+        notes: "Return leg for Prague day trip (same booking as outbound, CA$81.95 total incl. VAT).",
+        startTimeLocal: "2026-04-29T21:30",
+        endTimeLocal: "2026-04-29T23:25",
         sortOrder: 10,
         createdAt: "2026-02-14T08:12:00.000Z",
         updatedAt: "2026-02-14T08:12:00.000Z",
@@ -383,7 +406,8 @@ const trips: Trip[] = [
         category: "commute",
         title: "Travel: Dresden → Munich",
         locationLabel: "Rail via Leipzig or direct bus",
-        notes: "Train 4.5-5h or bus 6h30.",
+        commuteDetails: "Bus direct: 6 hr 30 min • Train: transfer at Leipzig, then direct train.",
+        notes: "Evaluate bus vs train based on transfer risk.",
         sortOrder: 10,
         createdAt: "2026-02-14T08:13:00.000Z",
         updatedAt: "2026-02-14T08:13:00.000Z",
@@ -410,7 +434,12 @@ const trips: Trip[] = [
         category: "commute",
         title: "Rail: Munich → Salzburg (RJX 61)",
         locationLabel: "München Hbf to Salzburg Hbf",
-        notes: "Dep 07:22, Arr 08:58.",
+        commuteDetails:
+          "18 Euro • Journey on Sa. 02.05.2026 • München Hbf 07:22 Pl. 11 (RJX 61) → Salzburg Hbf 08:58.",
+        locationLink: "https://int.bahn.de/en/buchung/start?vbid=1bea973b-d61a-41dd-a58d-ce8623a94ce7",
+        notes: "Morning outbound rail leg for Salzburg day trip.",
+        startTimeLocal: "2026-05-02T07:22",
+        endTimeLocal: "2026-05-02T08:58",
         sortOrder: 10,
         createdAt: "2026-02-14T08:15:00.000Z",
         updatedAt: "2026-02-14T08:15:00.000Z",
@@ -438,7 +467,12 @@ const trips: Trip[] = [
         category: "commute",
         title: "Rail: Salzburg → Munich (RJX 68)",
         locationLabel: "Salzburg Hbf to München Hbf",
-        notes: "Dep 21:00, Arr 22:32.",
+        commuteDetails:
+          "13 Euro • Journey on Sa. 02.05.2026 • Salzburg Hbf 21:00 (RJX 68) → München Hbf Gl.5-10 22:32 Pl. 9.",
+        locationLink: "https://int.bahn.de/en/buchung/start?vbid=eaf41133-79c4-4afc-8f83-bd657f7e015f",
+        notes: "Evening return rail leg from Salzburg.",
+        startTimeLocal: "2026-05-02T21:00",
+        endTimeLocal: "2026-05-02T22:32",
         sortOrder: 10,
         createdAt: "2026-02-14T08:17:00.000Z",
         updatedAt: "2026-02-14T08:17:00.000Z",
@@ -452,7 +486,12 @@ const trips: Trip[] = [
         category: "commute",
         title: "Travel: Munich → Frankfurt (ICE 726)",
         locationLabel: "München Hbf to Frankfurt(Main)Hbf",
-        notes: "Dep 07:42, Arr 11:02.",
+        commuteDetails:
+          "28 Euro • Journey on So. 03.05.2026 • München Hbf 07:42 Pl. 22 (ICE 726) → Frankfurt(Main)Hbf 11:02 Pl. 7 (ICE 726).",
+        locationLink: "https://int.bahn.de/en/buchung/start?vbid=4aab571f-81e2-4174-bd4c-90eec38f5e9c",
+        notes: "ICE morning transfer to Frankfurt on Sunday.",
+        startTimeLocal: "2026-05-03T07:42",
+        endTimeLocal: "2026-05-03T11:02",
         sortOrder: 10,
         createdAt: "2026-02-14T08:18:00.000Z",
         updatedAt: "2026-02-14T08:18:00.000Z",
@@ -501,6 +540,7 @@ const trips: Trip[] = [
   {
     id: "tokyo-fall",
     destination: "Tokyo, Japan",
+    timezone: "Asia/Tokyo",
     startDate: "2026-10-03",
     endDate: "2026-10-12",
     travelers: 1,
@@ -672,6 +712,7 @@ const trips: Trip[] = [
   {
     id: "lisbon-weekend",
     destination: "Lisbon, Portugal",
+    timezone: "Europe/Lisbon",
     startDate: "2026-06-05",
     endDate: "2026-06-08",
     travelers: 2,
@@ -756,6 +797,9 @@ function sanitizeItineraryItem(
     placeId: raw.placeId?.trim() || undefined,
     lat: typeof raw.lat === "number" && Number.isFinite(raw.lat) ? raw.lat : undefined,
     lng: typeof raw.lng === "number" && Number.isFinite(raw.lng) ? raw.lng : undefined,
+    locationLink: raw.locationLink?.trim() || undefined,
+    googleMapsLink: raw.googleMapsLink?.trim() || undefined,
+    commuteDetails: raw.commuteDetails?.trim() || undefined,
     notes: raw.notes?.trim() || undefined,
     startTimeLocal: raw.startTimeLocal || undefined,
     endTimeLocal: raw.endTimeLocal || undefined,
@@ -832,6 +876,65 @@ export function validateItineraryItemDraft(
   return null
 }
 
+export function defaultBlockWindow(block: ItineraryTimeBlock): {
+  startHour: number
+  startMinute: number
+  endHour: number
+  endMinute: number
+} {
+  if (block === "morning") {
+    return { startHour: 9, startMinute: 0, endHour: 12, endMinute: 0 }
+  }
+  if (block === "afternoon") {
+    return { startHour: 13, startMinute: 0, endHour: 17, endMinute: 0 }
+  }
+  return { startHour: 18, startMinute: 0, endHour: 21, endMinute: 0 }
+}
+
+function addDays(isoDate: string, dayOffset: number): string {
+  const parsed = parseDateUtc(isoDate)
+  if (Number.isNaN(parsed.getTime())) return isoDate
+  parsed.setUTCDate(parsed.getUTCDate() + dayOffset)
+  return parsed.toISOString().slice(0, 10)
+}
+
+function toLocalDateTimeString(
+  isoDate: string,
+  hour: number,
+  minute: number
+): string {
+  const hh = String(Math.max(0, Math.min(23, hour))).padStart(2, "0")
+  const mm = String(Math.max(0, Math.min(59, minute))).padStart(2, "0")
+  return `${isoDate}T${hh}:${mm}`
+}
+
+export function resolveItineraryStartLocal(item: TripItineraryItem, trip: Trip): string {
+  if (item.startTimeLocal) return item.startTimeLocal
+  const dayDate = addDays(trip.startDate, Math.max(0, item.dayIndex - 1))
+  const block = defaultBlockWindow(item.timeBlock)
+  return toLocalDateTimeString(dayDate, block.startHour, block.startMinute)
+}
+
+export function resolveItineraryEndLocal(item: TripItineraryItem, trip: Trip): string {
+  if (item.endTimeLocal) return item.endTimeLocal
+  const dayDate = addDays(trip.startDate, Math.max(0, item.dayIndex - 1))
+  const block = defaultBlockWindow(item.timeBlock)
+  return toLocalDateTimeString(dayDate, block.endHour, block.endMinute)
+}
+
+export function getDestinationTimezone(destinationValue: string): string {
+  const destination = destinationValue.toLowerCase()
+  if (destination.includes("germany") || destination.includes("berlin")) return "Europe/Berlin"
+  if (destination.includes("tokyo") || destination.includes("japan")) return "Asia/Tokyo"
+  if (destination.includes("lisbon") || destination.includes("portugal")) return "Europe/Lisbon"
+  return "UTC"
+}
+
+export function getTripTimezone(trip: Trip): string {
+  if (trip.timezone && trip.timezone.trim()) return trip.timezone.trim()
+  return getDestinationTimezone(trip.destination)
+}
+
 export function groupItineraryByDayAndBlock(
   items: TripItineraryItem[],
   totalDays: number
@@ -874,6 +977,7 @@ export function createFallbackTrip(tripId: string): Trip {
   return {
     id: safeId,
     destination: "New Trip",
+    timezone: "UTC",
     startDate: "2026-04-01",
     endDate: "2026-04-08",
     travelers: 1,

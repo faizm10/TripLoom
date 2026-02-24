@@ -28,9 +28,42 @@ export type AiPageContext = {
   details?: string
 }
 
+export type PlannerDraftItem = {
+  dayIndex?: number
+  title?: string
+  timeBlock?: "morning" | "afternoon" | "evening" | string
+  category?: string
+  notes?: string
+}
+
+export type PlannerDraft = {
+  destination?: string
+  country?: string
+  cities?: string[]
+  startDate?: string
+  endDate?: string
+  travelers?: number
+  budgetTotal?: number
+  activities?: string[]
+  itinerary?: PlannerDraftItem[]
+}
+
+export type PlannerChatResponse = {
+  answer: string
+  sources: AiSource[]
+  degraded: boolean
+  plannerDraft?: PlannerDraft
+}
+
 type AiChatEnvelope = {
   ok: boolean
   data?: AiChatResponse
+  error?: string
+}
+
+type PlannerChatEnvelope = {
+  ok: boolean
+  data?: PlannerChatResponse
   error?: string
 }
 
@@ -78,6 +111,30 @@ export async function postAiChat(params: {
   const payload = (await res.json().catch(() => null)) as AiChatEnvelope | null
   if (!res.ok || !payload?.ok || !payload.data) {
     throw new Error(payload?.error || `AI request failed (${res.status})`)
+  }
+  return payload.data
+}
+
+export async function postPlannerChat(params: {
+  messages: AiMessage[]
+  plannerContext?: Record<string, unknown>
+  refresh?: boolean
+}): Promise<PlannerChatResponse> {
+  const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080"
+  const token = parseSupabaseAccessTokenFromStorage()
+
+  const res = await fetch(`${backendBase}/v1/ai/planner/chat`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(params),
+  })
+
+  const payload = (await res.json().catch(() => null)) as PlannerChatEnvelope | null
+  if (!res.ok || !payload?.ok || !payload.data) {
+    throw new Error(payload?.error || `Planner request failed (${res.status})`)
   }
   return payload.data
 }

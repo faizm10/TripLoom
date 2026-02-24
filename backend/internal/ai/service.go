@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,6 +32,12 @@ type ChatRequest struct {
 	Refresh     bool           `json:"refresh"`
 }
 
+type PlannerChatRequest struct {
+	Messages       []ChatMessage  `json:"messages"`
+	PlannerContext map[string]any `json:"plannerContext"`
+	Refresh        bool           `json:"refresh"`
+}
+
 type Source struct {
 	Name      string `json:"name"`
 	Status    string `json:"status"`
@@ -45,6 +52,33 @@ type ChatResponse struct {
 	SuggestedActions []string `json:"suggestedActions"`
 	Sources          []Source `json:"sources"`
 	Degraded         bool     `json:"degraded"`
+}
+
+type PlannerDraftItem struct {
+	DayIndex  int    `json:"dayIndex,omitempty"`
+	Title     string `json:"title,omitempty"`
+	TimeBlock string `json:"timeBlock,omitempty"`
+	Category  string `json:"category,omitempty"`
+	Notes     string `json:"notes,omitempty"`
+}
+
+type PlannerDraft struct {
+	Destination string             `json:"destination,omitempty"`
+	Country     string             `json:"country,omitempty"`
+	Cities      []string           `json:"cities,omitempty"`
+	StartDate   string             `json:"startDate,omitempty"`
+	EndDate     string             `json:"endDate,omitempty"`
+	Travelers   int                `json:"travelers,omitempty"`
+	BudgetTotal float64            `json:"budgetTotal,omitempty"`
+	Activities  []string           `json:"activities,omitempty"`
+	Itinerary   []PlannerDraftItem `json:"itinerary,omitempty"`
+}
+
+type PlannerChatResponse struct {
+	Answer       string        `json:"answer"`
+	Sources      []Source      `json:"sources"`
+	Degraded     bool          `json:"degraded"`
+	PlannerDraft *PlannerDraft `json:"plannerDraft,omitempty"`
 }
 
 type RefreshContextRequest struct {
@@ -163,6 +197,54 @@ func (s *Service) Chat(ctx context.Context, userID string, req ChatRequest) (*Ch
 		SuggestedActions: suggestActionsForPage(req.PageKey),
 		Sources:          sources,
 		Degraded:         degraded,
+	}
+	return resp, nil
+}
+
+func (s *Service) PlannerChat(ctx context.Context, userID string, req PlannerChatRequest) (*PlannerChatResponse, error) {
+	if len(req.Messages) == 0 {
+		return nil, ErrInvalidInput
+	}
+
+	contextPayload := map[string]any{
+		"pageKey": "agent",
+		"userID":  userID,
+	}
+	if len(req.PlannerContext) > 0 {
+		contextPayload["plannerContext"] = req.PlannerContext
+	}
+
+	sources := []Source{
+		{Name: "planner_context", Status: "ok", FetchedAt: time.Now().UTC().Format(time.RFC3339)},
+	}
+	degraded := false
+
+	userPrompt := req.Messages[len(req.Messages)-1].Content
+	model := s.modelSelector.Select(userPrompt, req.Messages)
+	systemPrompt := BuildPlannerSystemPrompt(contextPayload, degraded)
+
+	mapped := make([]openai.Message, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		if m.Role != "assistant" {
+			m.Role = "user"
+		}
+		mapped = append(mapped, openai.Message{Role: m.Role, Content: m.Content})
+	}
+
+	result, err := s.openaiClient.ResponsesChat(ctx, model, systemPrompt, mapped)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(result.Text) == "" || result.Text == "I could not generate a response." {
+		result.Text = "I can help build this trip plan. Share destination, dates (or month), traveler count, and top experiences, then I’ll draft a practical plan you can apply."
+	}
+
+	draft := buildPlannerDraft(req.PlannerContext, req.Messages, result.Text)
+	resp := &PlannerChatResponse{
+		Answer:       result.Text,
+		Sources:      sources,
+		Degraded:     degraded,
+		PlannerDraft: draft,
 	}
 	return resp, nil
 }
@@ -320,4 +402,261 @@ func suggestActionsForPage(pageKey string) []string {
 	default:
 		return []string{"Ask for next best step", "Request a prioritized checklist"}
 	}
+}
+
+func buildPlannerDraft(plannerContext map[string]any, messages []ChatMessage, answer string) *PlannerDraft {
+	combined := strings.TrimSpace(strings.Join([]string{stringFromMap(plannerContext, "mustDoExperiences"), stringFromMap(plannerContext, "concerns"), answer, collectUserMessages(messages)}, "\n"))
+	draft := &PlannerDraft{}
+
+	if destination := inferDestination(plannerContext, combined); destination != "" {
+		draft.Destination = destination
+	}
+	if country := inferCountry(plannerContext, combined); country != "" {
+		draft.Country = country
+	}
+	draft.Cities = inferCities(plannerContext, combined)
+	startDate, endDate := inferDateRange(combined)
+	draft.StartDate = startDate
+	draft.EndDate = endDate
+	if travelers := inferTravelers(plannerContext, combined); travelers > 0 {
+		draft.Travelers = travelers
+	}
+	if budget := inferBudget(combined); budget > 0 {
+		draft.BudgetTotal = budget
+	}
+	draft.Activities = inferActivities(plannerContext, combined)
+	draft.Itinerary = buildItinerarySkeleton(draft.Activities, startDate, endDate)
+
+	if draft.Destination == "" && draft.Country == "" && len(draft.Cities) == 0 && draft.StartDate == "" && draft.EndDate == "" && draft.Travelers == 0 && len(draft.Activities) == 0 {
+		return nil
+	}
+	return draft
+}
+
+func stringFromMap(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	if v, ok := m[key].(string); ok {
+		return strings.TrimSpace(v)
+	}
+	return ""
+}
+
+func collectUserMessages(messages []ChatMessage) string {
+	parts := make([]string, 0, len(messages))
+	for _, m := range messages {
+		if m.Role == "assistant" {
+			continue
+		}
+		if t := strings.TrimSpace(m.Content); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func inferDestination(plannerContext map[string]any, combined string) string {
+	if v := stringFromMap(plannerContext, "destination"); v != "" {
+		return v
+	}
+	re := regexp.MustCompile(`(?i)\b(?:to|in|for)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b`)
+	if m := re.FindStringSubmatch(combined); len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
+func inferCountry(plannerContext map[string]any, combined string) string {
+	if v := stringFromMap(plannerContext, "country"); v != "" {
+		return v
+	}
+	re := regexp.MustCompile(`(?i)\b(?:in|to)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\b`)
+	if m := re.FindStringSubmatch(combined); len(m) > 1 {
+		return strings.TrimSpace(m[1])
+	}
+	return ""
+}
+
+func inferCities(plannerContext map[string]any, combined string) []string {
+	if raw, ok := plannerContext["cities"]; ok {
+		switch v := raw.(type) {
+		case []any:
+			out := make([]string, 0, len(v))
+			seen := map[string]bool{}
+			for _, item := range v {
+				if s, ok := item.(string); ok {
+					s = strings.TrimSpace(s)
+					if s == "" {
+						continue
+					}
+					k := strings.ToLower(s)
+					if seen[k] {
+						continue
+					}
+					seen[k] = true
+					out = append(out, s)
+				}
+			}
+			if len(out) > 0 {
+				return out
+			}
+		case string:
+			parts := strings.FieldsFunc(v, func(r rune) bool {
+				return r == ',' || r == ';' || r == '\n'
+			})
+			out := make([]string, 0, len(parts))
+			seen := map[string]bool{}
+			for _, p := range parts {
+				s := strings.TrimSpace(p)
+				if s == "" {
+					continue
+				}
+				k := strings.ToLower(s)
+				if seen[k] {
+					continue
+				}
+				seen[k] = true
+				out = append(out, s)
+			}
+			if len(out) > 0 {
+				return out
+			}
+		}
+	}
+
+	re := regexp.MustCompile(`(?i)\b(?:in|to|via)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})`)
+	matches := re.FindAllStringSubmatch(combined, -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]bool{}
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		s := strings.TrimSpace(m[1])
+		if s == "" {
+			continue
+		}
+		k := strings.ToLower(s)
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, s)
+		if len(out) >= 6 {
+			break
+		}
+	}
+	return out
+}
+
+func inferDateRange(text string) (string, string) {
+	re := regexp.MustCompile(`\b(20\d{2}-\d{2}-\d{2})\b`)
+	matches := re.FindAllStringSubmatch(text, -1)
+	if len(matches) >= 2 {
+		return matches[0][1], matches[1][1]
+	}
+	if len(matches) == 1 {
+		return matches[0][1], ""
+	}
+	return "", ""
+}
+
+func inferTravelers(plannerContext map[string]any, text string) int {
+	if raw, ok := plannerContext["travelers"]; ok {
+		switch v := raw.(type) {
+		case float64:
+			if v > 0 {
+				return int(v)
+			}
+		case int:
+			if v > 0 {
+				return v
+			}
+		case string:
+			if n := regexp.MustCompile(`\d+`).FindString(v); n != "" {
+				if parsed, err := strconv.Atoi(n); err == nil && parsed > 0 {
+					return parsed
+				}
+			}
+		}
+	}
+	if m := regexp.MustCompile(`(?i)\b(\d{1,2})\s+(?:travelers?|people|adults?)\b`).FindStringSubmatch(text); len(m) > 1 {
+		if parsed, err := strconv.Atoi(m[1]); err == nil && parsed > 0 {
+			return parsed
+		}
+	}
+	if strings.Contains(strings.ToLower(text), "solo") {
+		return 1
+	}
+	return 0
+}
+
+func inferBudget(text string) float64 {
+	re := regexp.MustCompile(`(?i)(?:budget|spend|cost)[^\d]{0,20}(\d{2,6})`)
+	if m := re.FindStringSubmatch(text); len(m) > 1 {
+		if parsed, err := strconv.ParseFloat(m[1], 64); err == nil {
+			return parsed
+		}
+	}
+	return 0
+}
+
+func inferActivities(plannerContext map[string]any, text string) []string {
+	base := stringFromMap(plannerContext, "mustDoExperiences")
+	if base == "" {
+		base = text
+	}
+	parts := strings.FieldsFunc(base, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n'
+	})
+	out := make([]string, 0, len(parts))
+	seen := map[string]bool{}
+	for _, part := range parts {
+		v := strings.TrimSpace(part)
+		if v == "" {
+			continue
+		}
+		key := strings.ToLower(v)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, v)
+		if len(out) >= 8 {
+			break
+		}
+	}
+	return out
+}
+
+func buildItinerarySkeleton(activities []string, startDate, endDate string) []PlannerDraftItem {
+	if len(activities) == 0 {
+		return nil
+	}
+	days := len(activities)
+	if startDate != "" && endDate != "" {
+		if start, err := time.Parse("2006-01-02", startDate); err == nil {
+			if end, err := time.Parse("2006-01-02", endDate); err == nil && !end.Before(start) {
+				days = int(end.Sub(start).Hours()/24) + 1
+				if days < 1 {
+					days = 1
+				}
+			}
+		}
+	}
+	if days > len(activities) {
+		days = len(activities)
+	}
+	out := make([]PlannerDraftItem, 0, days)
+	for i := 0; i < days; i++ {
+		out = append(out, PlannerDraftItem{
+			DayIndex:  i + 1,
+			Title:     activities[i],
+			TimeBlock: "afternoon",
+			Category:  "activities",
+			Notes:     "Drafted by Agent planner conversation.",
+		})
+	}
+	return out
 }

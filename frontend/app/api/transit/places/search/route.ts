@@ -48,12 +48,15 @@ function normalizePrediction(
 }
 
 export async function GET(request: Request) {
-  const key = process.env.GOOGLE_MAPS_API_KEY
+  const key =
+    process.env.GOOGLE_MAPS_API_KEY ||
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY
   if (!key) {
     return NextResponse.json(
       {
         ok: false,
-        error: "Transit place search requires GOOGLE_MAPS_API_KEY.",
+        error:
+          "Transit place search requires GOOGLE_MAPS_API_KEY (or NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY).",
       },
       { status: 503 }
     )

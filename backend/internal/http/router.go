@@ -39,6 +39,7 @@ func NewRouter(cfg *config.Config, aiService *ai.Service, repo *store.AIReposito
 	}
 
 	api.Post("/ai/chat", h.Chat)
+	api.Post("/ai/planner/chat", h.PlannerChat)
 	api.Get("/ai/conversations/:tripId", h.ListConversations)
 	api.Get("/ai/conversations/:conversationId/messages", h.ListMessages)
 	api.Post("/ai/context/refresh", h.RefreshContext)

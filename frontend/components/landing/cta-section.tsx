@@ -13,7 +13,7 @@ export function CtaSection() {
         initial={{ opacity: 0, y: 24 }}
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, margin: "-60px" }}
-        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+        transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] as const }}
         className="relative overflow-hidden border border-primary/30 px-8 py-14 text-center sm:px-16"
         style={{
           background:

@@ -92,7 +92,7 @@ export function RoadmapSection() {
               initial={{ opacity: 0, x: -16 }}
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true, margin: "-40px" }}
-              transition={{ duration: 0.45, delay: idx * 0.05, ease: [0.22, 1, 0.36, 1] }}
+              transition={{ duration: 0.45, delay: idx * 0.05, ease: [0.22, 1, 0.36, 1] as const }}
               className="flex items-start gap-4 border border-border bg-card p-4 transition-colors hover:border-primary/20"
             >
               {/* Number */}

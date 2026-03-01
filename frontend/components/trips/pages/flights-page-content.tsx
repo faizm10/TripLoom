@@ -3,14 +3,12 @@
 import { Fragment, useEffect, useMemo, useState } from "react"
 import {
   ArrowDownIcon,
-  ArrowUpIcon,
   CalendarIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   FilterIcon,
   Loader2Icon,
-  PencilIcon,
   PlaneIcon,
   PlusIcon,
   SearchIcon,
@@ -22,13 +20,10 @@ import {
   DestinationSearch,
   type DestinationSuggestion,
 } from "@/components/dashboard-home/destination-search"
-
 import type { Trip } from "@/lib/trips"
 import {
-  deleteTripFlightFromSupabase,
   getTripFlightsFromSupabase,
   saveTripFlightToSupabase,
-  updateTripFlightInSupabase,
 } from "@/lib/supabase-trip-flights"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -38,230 +33,40 @@ import type { FlightOffer } from "@/lib/flights"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
-type Place = { displayName: string; iataCode: string }
-type TripType = "one_way" | "round_trip" | "multi_city"
-type Leg = { origin: Place | null; destination: Place | null; date: string }
+import {
+  type Place,
+  type TripType,
+  type Leg,
+  type SavedFlightChoice,
+  type ManualSortKey,
+  type InboundLookupDraft,
+  type InboundFlightEntry,
+  type InboundStopDetail,
+  formatTime,
+  formatDate,
+  getOfferRow,
+  getStopsLabel,
+  getStopsCount,
+  getStopDetails,
+  formatLayover,
+  durationToMinutes,
+  MIN_DATE,
+  SortableTh,
+  SavedFlightsCard,
+} from "./flights"
 
-function formatTime(iso: string): string {
-  try {
-    const d = new Date(iso)
-    return d.toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    })
-  } catch {
-    return iso
-  }
-}
-
-function formatDate(iso: string): string {
-  try {
-    // Keep YYYY-MM-DD as a local calendar date to avoid UTC shift (e.g. Apr 24 -> Apr 23)
-    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/)
-    const d = m
-      ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
-      : new Date(iso)
-    return d.toLocaleDateString("en-US", {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-    })
-  } catch {
-    return iso
-  }
-}
-
-const minDate = new Date().toISOString().slice(0, 10)
-
-function getOfferRow(offer: FlightOffer) {
-  const slice = offer.slices[0]
-  const firstSeg = slice?.segments?.[0]
-  const route =
-    offer.slices.length > 1
-      ? offer.slices
-          .map(
-            (s) =>
-              `${s.origin?.iataCode ?? ""} → ${s.destination?.iataCode ?? ""}`
-          )
-          .join(" · ")
-      : `${slice?.origin?.iataCode ?? ""} → ${slice?.destination?.iataCode ?? ""}`
-  const dates =
-    offer.slices.length > 1
-      ? offer.slices
-          .map((s) => {
-            const seg = s.segments?.[0]
-            return seg?.departingAt
-              ? formatDate(seg.departingAt.slice(0, 10))
-              : ""
-          })
-          .filter(Boolean)
-          .join(" · ")
-      : firstSeg?.departingAt != null
-        ? formatDate(firstSeg.departingAt.slice(0, 10))
-        : ""
-  const departure = firstSeg ? formatTime(firstSeg.departingAt) : ""
-  const arrival = firstSeg ? formatTime(firstSeg.arrivingAt) : ""
-  const duration = slice?.duration ?? ""
-  return { route, dateStr: dates, departure, arrival, duration }
-}
-
-function getStopsLabel(offer: FlightOffer): string {
-  const parts = offer.slices.map((slice) => {
-    const n = Math.max(0, (slice.segments?.length ?? 1) - 1)
-    if (n === 0) return "Non-stop"
-    if (n === 1) return "1 stop"
-    return `${n} stops`
-  })
-  return parts.join(" · ")
-}
-
-function getStopsCount(offer: FlightOffer): number {
-  return offer.slices.reduce(
-    (sum, slice) => sum + Math.max(0, (slice.segments?.length ?? 1) - 1),
-    0
-  )
-}
-
-type StopDetail = {
-  sliceIndex: number
-  stopIndex: number
-  airportCode: string
-  airportName: string
-  layoverMinutes: number
-}
-
-function getStopDetails(offer: FlightOffer): StopDetail[] {
-  const out: StopDetail[] = []
-  offer.slices.forEach((slice, sliceIndex) => {
-    const segs = slice.segments ?? []
-    for (let i = 0; i < segs.length - 1; i++) {
-      const arr = segs[i]
-      const dep = segs[i + 1]
-      const dest = arr.destination
-      const arrTime = arr.arrivingAt ? new Date(arr.arrivingAt).getTime() : 0
-      const depTime = dep.departingAt ? new Date(dep.departingAt).getTime() : 0
-      const layoverMinutes = arrTime && depTime ? Math.round((depTime - arrTime) / 60000) : 0
-      out.push({
-        sliceIndex,
-        stopIndex: i + 1,
-        airportCode: dest?.iataCode ?? "",
-        airportName: dest?.name ?? dest?.iataCode ?? "—",
-        layoverMinutes,
-      })
-    }
-  })
-  return out
-}
-
-function formatLayover(minutes: number): string {
-  if (minutes < 60) return `${minutes}m`
-  const h = Math.floor(minutes / 60)
-  const m = minutes % 60
-  return m > 0 ? `${h}h ${m}m` : `${h}h`
-}
-
-function durationToMinutes(d: string): number {
-  const h = d.match(/(\d+)h/)?.[1]
-  const m = d.match(/(\d+)m/)?.[1]
-  return (parseInt(h ?? "0", 10) * 60) + parseInt(m ?? "0", 10)
-}
-
-type ManualSortKey = "route" | "date" | "departure" | "arrival" | "duration" | "stops" | "cost" | "airline"
-
-type InboundStopDetail = {
-  airport: string
-  layover: string
-}
-
-type InboundLookupResult = {
-  flightNumber: string
-  airline: string
-  airlineLogoUrl?: string
-  routeFrom: string
-  routeTo: string
-  departureAirportName?: string
-  arrivalAirportName?: string
-  departureLocal: string
-  arrivalLocal: string
-  departureTimezone?: string
-  arrivalTimezone?: string
-  duration: string
-  terminalGate?: string
-  stops: number
-}
-
-type InboundLookupDraft = InboundLookupResult & {
-  cost: string
-  stopDetails: InboundStopDetail[]
-}
-
-type InboundFlightEntry = InboundLookupDraft & {
-  id: string
-  date: string
-}
-
-type SavedFlightChoice = {
-  id: string
-  source: string
-  route: string
-  date: string
-  departure: string
-  arrival: string
-  duration: string
-  stops: string
-  airline: string
-  cost: string
-  bookUrl?: string | null
-}
-
-function SortableTh<K extends string>({
-  sortKey,
-  currentSortBy,
-  currentSortDir,
-  label,
-  onSort,
-}: {
-  sortKey: K
-  currentSortBy: K | null
-  currentSortDir: "asc" | "desc"
-  label: string
-  onSort: (key: K) => void
-}) {
-  const active = currentSortBy === sortKey
-  return (
-    <th className="text-left p-2 font-medium">
-      <button
-        type="button"
-        onClick={() => onSort(sortKey)}
-        className="inline-flex items-center gap-1 hover:underline focus:outline-none focus:ring-1 focus:ring-ring rounded"
-      >
-        {label}
-        {active ? (
-          currentSortDir === "asc" ? (
-            <ArrowUpIcon className="size-3.5" />
-          ) : (
-            <ArrowDownIcon className="size-3.5" />
-          )
-        ) : null}
-      </button>
-    </th>
-  )
-}
+const minDate = MIN_DATE
 
 export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   const fromContext = useTripPage()
   const trip = fromContext ?? tripProp
 
+  // ——— Search form state ———
   const [tripType, setTripType] = useState<TripType>("round_trip")
-
-  // Manual: one-way
   const [origin, setOrigin] = useState<Place | null>(null)
   const [destination, setDestination] = useState<Place | null>(null)
   const [departureDate, setDepartureDate] = useState("")
-  // Manual: round trip
   const [returnDate, setReturnDate] = useState("")
-  // Manual: multi city
   const [legs, setLegs] = useState<Leg[]>([
     { origin: null, destination: null, date: "" },
   ])
@@ -275,25 +80,25 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   const [manualSortDir, setManualSortDir] = useState<"asc" | "desc">("asc")
   const [manualFilterAirline, setManualFilterAirline] = useState("")
   const [manualFilterMaxPrice, setManualFilterMaxPrice] = useState("")
-
   const [mounted, setMounted] = useState(false)
   const [expandedManualOfferIds, setExpandedManualOfferIds] = useState<Set<string>>(new Set())
-  // SerpAPI round trip two-step: outbound selected → load return flights
+
+  // ——— Round-trip (SerpAPI two-step) state ———
   const [selectedOutboundOfferId, setSelectedOutboundOfferId] = useState<string | null>(null)
   const [returnOffers, setReturnOffers] = useState<FlightOffer[]>([])
   const [returnLoading, setReturnLoading] = useState(false)
   const [returnError, setReturnError] = useState<string | null>(null)
   const [selectedReturnOfferId, setSelectedReturnOfferId] = useState<string | null>(null)
   const [expandedReturnOfferIds, setExpandedReturnOfferIds] = useState<Set<string>>(new Set())
-  // Tab flow for SerpAPI round trip: Outbound → Return → Summary
   const [flightStepTab, setFlightStepTab] = useState<"outbound" | "return" | "summary">("outbound")
-  useEffect(() => setMounted(true), [])
-  useEffect(() => {
-    if (!trip.id) return
-    getTripFlightsFromSupabase(trip.id)
-      .then((list) => setSavedFlights(list))
-      .catch(() => {})
-  }, [trip.id])
+
+  // ——— Saved flights & edit state ———
+  const [savedFlights, setSavedFlights] = useState<SavedFlightChoice[]>([])
+  const [saveConfirmation, setSaveConfirmation] = useState<string | null>(null)
+  const [editingFlightId, setEditingFlightId] = useState<string | null>(null)
+  const [editingDate, setEditingDate] = useState("")
+
+  // ——— Inbound lookup state ———
   const [lookupFlightNumber, setLookupFlightNumber] = useState("")
   const [lookupDate, setLookupDate] = useState("")
   const [lookupLoading, setLookupLoading] = useState(false)
@@ -301,10 +106,14 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   const [lookupDraft, setLookupDraft] = useState<InboundLookupDraft | null>(null)
   const [lookupEditMode, setLookupEditMode] = useState(false)
   const [inboundEntries, setInboundEntries] = useState<InboundFlightEntry[]>([])
-  const [savedFlights, setSavedFlights] = useState<SavedFlightChoice[]>([])
-  const [saveConfirmation, setSaveConfirmation] = useState<string | null>(null)
-  const [editingFlightId, setEditingFlightId] = useState<string | null>(null)
-  const [editingDate, setEditingDate] = useState("")
+
+  useEffect(() => setMounted(true), [])
+  useEffect(() => {
+    if (!trip.id) return
+    getTripFlightsFromSupabase(trip.id)
+      .then((list) => setSavedFlights(list))
+      .catch(() => {})
+  }, [trip.id])
 
   const toggleManualExpanded = (offerId: string) => {
     setExpandedManualOfferIds((prev) => {
@@ -1031,136 +840,17 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
 
   return (
     <div className="space-y-6">
-      {savedFlights.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CheckIcon className="size-4 text-green-600" />
-              Your chosen flights
-            </CardTitle>
-            <p className="text-muted-foreground text-sm">
-              Your saved flight(s) for this trip. Edit the date or remove if your plans change.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {savedFlights.map((f) => (
-              <div
-                key={f.id}
-                className="border-border flex flex-col gap-3 rounded-lg border bg-muted/30 p-4"
-              >
-                {editingFlightId === f.id ? (
-                  <>
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
-                      <span className="font-medium capitalize">{f.source}</span>
-                      <span className="text-muted-foreground">·</span>
-                      <span>{f.route}</span>
-                      <span className="text-muted-foreground">·</span>
-                      <span>{f.airline}</span>
-                      <span className="text-muted-foreground">·</span>
-                      <span className="font-medium">{f.cost}</span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Label className="text-xs">Flight date</Label>
-                      <input
-                        type="date"
-                        value={editingDate}
-                        onChange={(e) => setEditingDate(e.target.value)}
-                        className="border-input bg-background h-9 rounded-md border px-2 text-sm"
-                      />
-                      <Button
-                        size="sm"
-                        className="rounded-md"
-                        onClick={() => {
-                          if (!editingDate.trim()) return
-                          const newDate = editingDate.trim()
-                          setSavedFlights((prev) =>
-                            prev.map((x) => (x.id === f.id ? { ...x, date: newDate } : x))
-                          )
-                          setEditingFlightId(null)
-                          setEditingDate("")
-                          updateTripFlightInSupabase(trip.id, f.id, { date: newDate })
-                            .then(() => toast.success("Flight date updated."))
-                            .catch((e) =>
-                              toast.error(
-                                e instanceof Error ? e.message : "Could not update flight in cloud."
-                              )
-                            )
-                        }}
-                      >
-                        Save
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="rounded-md"
-                        onClick={() => {
-                          setEditingFlightId(null)
-                          setEditingDate("")
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="bg-primary/10 text-primary rounded px-1.5 py-0.5 text-xs font-medium capitalize">
-                            {f.source}
-                          </span>
-                          <span className="font-medium">{f.route}</span>
-                        </div>
-                        <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-0 text-sm">
-                          <span>{f.date}</span>
-                          <span>{f.departure} → {f.arrival}</span>
-                          <span>{f.duration}</span>
-                          {f.stops && <span>{f.stops}</span>}
-                        </div>
-                        <div className="text-muted-foreground text-xs">
-                          {f.airline} · {f.cost}
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="rounded-md gap-1"
-                          onClick={() => {
-                            setEditingFlightId(f.id)
-                            setEditingDate(f.date)
-                          }}
-                        >
-                          <PencilIcon className="size-3.5" />
-                          Edit date
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="rounded-md gap-1 text-destructive hover:text-destructive"
-                          onClick={() => {
-                            setSavedFlights((prev) => prev.filter((x) => x.id !== f.id))
-                            deleteTripFlightFromSupabase(trip.id, f.id).catch((e) =>
-                              toast.error(
-                                e instanceof Error ? e.message : "Could not remove flight from cloud."
-                              )
-                            )
-                          }}
-                        >
-                          <Trash2Icon className="size-3.5" />
-                          Remove
-                        </Button>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+      <SavedFlightsCard
+        tripId={trip.id}
+        flights={savedFlights}
+        editingFlightId={editingFlightId}
+        editingDate={editingDate}
+        onFlightsChange={setSavedFlights}
+        onEditingFlightIdChange={setEditingFlightId}
+        onEditingDateChange={setEditingDate}
+      />
 
+      {/* Manual search header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="inline-flex items-center gap-2 text-sm font-medium">
             <SearchIcon className="size-3.5" />

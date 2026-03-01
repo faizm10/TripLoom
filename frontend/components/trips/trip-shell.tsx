@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { LogOutIcon, PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react"
 
 import { tripNavItems } from "@/components/trips/nav"
@@ -26,6 +26,8 @@ import {
   SidebarSeparator,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { createClient } from "@/lib/supabase/client"
+import type { User } from "@supabase/supabase-js"
 import type { Trip } from "@/lib/trips"
 
 const TripPageContext = React.createContext<Trip | null>(null)
@@ -83,7 +85,19 @@ export function TripShell({
   children: React.ReactNode
 }) {
   const pathname = usePathname()
+  const router = useRouter()
   const [chatOpen, setChatOpen] = React.useState(false)
+
+  const [user, setUser] = React.useState<User | null>(null)
+
+  React.useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data }) => setUser(data.user))
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+      setUser(session?.user ?? null)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
 
   const pageKey = getPageKey(pathname)
   const header = pageCopy[pageKey] || pageCopy.overview
@@ -135,15 +149,27 @@ export function TripShell({
             <div className="border p-2 text-xs">
               <div className="flex items-center gap-2">
                 <Avatar className="size-7 rounded-none">
-                  <AvatarFallback className="rounded-none text-[10px]">FM</AvatarFallback>
+                  <AvatarFallback className="rounded-none text-[10px]">
+                    {user?.email?.charAt(0).toUpperCase() || "U"}
+                  </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0">
-                  <p className="truncate font-medium">Faiz Mustansar</p>
-                  <p className="text-muted-foreground truncate">faiz@triploom.com</p>
+                  <p className="truncate font-medium">{user?.user_metadata?.name || "Traveler"}</p>
+                  <p className="text-muted-foreground truncate">{user?.email}</p>
                 </div>
               </div>
-              <Button variant="outline" size="sm" className="mt-2 w-full rounded-none">
-                <LogOutIcon />
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="mt-2 w-full rounded-none"
+                onClick={async () => {
+                  const supabase = createClient()
+                  await supabase.auth.signOut()
+                  router.push("/")
+                  router.refresh()
+                }}
+              >
+                <LogOutIcon className="size-3.5 mr-2" />
                 Sign out
               </Button>
             </div>

@@ -1,7 +1,6 @@
 # API references
 
-- [Duffel](https://duffel.com/) – flight offers and booking.
-- [SerpAPI Google Flights](https://serpapi.com/google-flights-api) – search params and behaviour.
+- [SerpAPI Google Flights](https://serpapi.com/google-flights-api) – flight search, return flights, and booking options.
 
 ## SerpAPI Google Flights (how we use it)
 

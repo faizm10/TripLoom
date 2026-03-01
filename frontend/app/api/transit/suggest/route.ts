@@ -137,13 +137,15 @@ function normalizeRoutes(
 }
 
 export async function POST(request: Request) {
-  const key = process.env.GOOGLE_MAPS_API_KEY
+  const key =
+    process.env.GOOGLE_MAPS_API_KEY ||
+    process.env.NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY
   if (!key) {
     return NextResponse.json(
       {
         ok: false,
         error:
-          "Missing GOOGLE_MAPS_API_KEY on server. Transit suggestions unavailable.",
+          "Missing GOOGLE_MAPS_API_KEY (or NEXT_PUBLIC_GOOGLE_MAPS_EMBED_API_KEY) on server. Transit suggestions unavailable.",
       },
       { status: 503 }
     )

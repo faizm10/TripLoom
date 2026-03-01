@@ -22,7 +22,7 @@ const fadeUp = {
 }
 
 const stats = [
-  { icon: PlaneIcon, label: "Flights", value: "Duffel API" },
+  { icon: PlaneIcon, label: "Flights", value: "SerpAPI" },
   { icon: MapPinIcon, label: "Hotels", value: "Booking.com" },
   { icon: CalendarDaysIcon, label: "Itinerary", value: "Day Planner" },
   { icon: SparklesIcon, label: "AI", value: "GPT-4.1" },

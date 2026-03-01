@@ -40,11 +40,14 @@ export function OverviewPageContent({ trip: tripProp }: { trip: Trip }) {
   const updateTrip = useUpdateTrip()
   const nextStep = getNextStep(trip)
   const missing = getMissingChecklist(trip)
+  const [mounted, setMounted] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
   const [destinationDraft, setDestinationDraft] = React.useState(trip.destination)
   const [startDateDraft, setStartDateDraft] = React.useState(trip.startDate)
   const [endDateDraft, setEndDateDraft] = React.useState(trip.endDate)
   const [travelersDraft, setTravelersDraft] = React.useState(String(trip.travelers))
+
+  React.useEffect(() => setMounted(true), [])
 
   React.useEffect(() => {
     if (!editOpen) return
@@ -104,11 +107,12 @@ export function OverviewPageContent({ trip: tripProp }: { trip: Trip }) {
               </p>
             </div>
             <div className="flex gap-2">
-              <Dialog open={editOpen} onOpenChange={setEditOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" size="sm">Edit Trip</Button>
-                </DialogTrigger>
-                <DialogContent>
+              {mounted ? (
+                <Dialog open={editOpen} onOpenChange={setEditOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm">Edit Trip</Button>
+                  </DialogTrigger>
+                  <DialogContent>
                   <DialogHeader>
                     <DialogTitle>Edit Trip Basics</DialogTitle>
                     <DialogDescription>
@@ -161,7 +165,10 @@ export function OverviewPageContent({ trip: tripProp }: { trip: Trip }) {
                     <Button onClick={handleSaveBasics}>Save changes</Button>
                   </DialogFooter>
                 </DialogContent>
-              </Dialog>
+                </Dialog>
+              ) : (
+                <Button variant="outline" size="sm">Edit Trip</Button>
+              )}
               <Button variant="outline" size="sm">
                 <Share2Icon /> Share
               </Button>

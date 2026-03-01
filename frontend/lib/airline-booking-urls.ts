@@ -22,7 +22,7 @@ export const AIRLINE_BOOKING_URLS: Record<string, string> = {
   AS: "https://www.alaskaair.com/planbook",
   F9: "https://www.flyfrontier.com/booking/",
   NK: "https://www.spirit.com/book/flights",
-  ZZ: "https://duffel.com", // Duffel Airways test
+  ZZ: "https://www.google.com/travel/flights",
 }
 
 export function getAirlineBookingUrl(iataCode: string): string {

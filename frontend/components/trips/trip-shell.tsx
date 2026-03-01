@@ -101,6 +101,12 @@ export function TripShell({
 
   const pageKey = getPageKey(pathname)
   const header = pageCopy[pageKey] || pageCopy.overview
+  const pageDetails = [
+    `destination=${trip.destination}`,
+    `dates=${trip.startDate} to ${trip.endDate}`,
+    `travelers=${trip.travelers}`,
+    `status=${trip.status}`,
+  ].join("; ")
 
   return (
     <TripPageContext.Provider value={trip}>
@@ -201,7 +207,17 @@ export function TripShell({
 
           <div className="flex min-h-0 flex-1">
             <section className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">{children}</section>
-            <TripAiPanel open={chatOpen} />
+            <TripAiPanel
+              open={chatOpen}
+              tripId={trip.id}
+              pageKey={pageKey}
+              pageContext={{
+                title: header.title,
+                subtitle: header.subtitle,
+                path: pathname,
+                details: pageDetails,
+              }}
+            />
           </div>
         </div>
       </SidebarInset>

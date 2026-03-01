@@ -88,15 +88,22 @@ export function AllTripsPageContent({
   return (
     <main className="mx-auto min-h-screen w-full max-w-6xl px-6 py-8 sm:px-10 sm:py-10">
       <div className="mb-4 rounded-sm border bg-card p-5 sm:p-6">
-        <p className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
-          Trips
-        </p>
-        <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
-          All trips
-        </h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Browse upcoming, active, and completed trips in one place.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
+              Trips
+            </p>
+            <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
+              All trips
+            </h1>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Browse upcoming, active, and completed trips in one place.
+            </p>
+          </div>
+          <Button asChild>
+            <Link href="/agent">Plan with Agent</Link>
+          </Button>
+        </div>
       </div>
 
       <div className="space-y-4">

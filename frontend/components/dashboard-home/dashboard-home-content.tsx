@@ -11,9 +11,13 @@ export function DashboardHomeContent() {
 
   return (
     <div className="space-y-4">
-      <NewTripCard />
-      {mostActiveTrip && (
-        <ContinuePlanningCard trip={mostActiveTrip} />
+      {mostActiveTrip ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          <NewTripCard />
+          <ContinuePlanningCard trip={mostActiveTrip} />
+        </div>
+      ) : (
+        <NewTripCard />
       )}
       <TripListSection trips={trips} />
     </div>

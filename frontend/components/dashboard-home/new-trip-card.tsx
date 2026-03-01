@@ -3,6 +3,13 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import {
+  CalendarCheck,
+  CalendarRange,
+  CalendarSearch,
+  User,
+  Users,
+} from "lucide-react"
 
 import { useCreateTrip } from "@/components/providers/trips-provider"
 import { cn } from "@/lib/utils"
@@ -14,6 +21,17 @@ import {
 } from "@/lib/new-trip-draft"
 import { Button } from "@/components/ui/button"
 import { DestinationSearch } from "@/components/dashboard-home/destination-search"
+
+const DATE_MODES = [
+  { value: "exact", icon: CalendarCheck, label: "Exact" },
+  { value: "weekend", icon: CalendarRange, label: "Weekend" },
+  { value: "flexible", icon: CalendarSearch, label: "Flexible" },
+] as const
+
+const TRAVELER_MODES = [
+  { value: "solo", icon: User, label: "Solo" },
+  { value: "group", icon: Users, label: "Group" },
+] as const
 
 export function NewTripCard() {
   const router = useRouter()
@@ -68,75 +86,54 @@ export function NewTripCard() {
 
   return (
     <section className="rounded-sm border bg-card p-5 sm:p-6">
-      <p className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
-        Plan a New Trip
-      </p>
-      <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
-        Start in 20 seconds
-      </h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        Pick destination, dates, and travelers. TripLoom builds your guided flow
-        instantly.
-      </p>
-
-      <div className="mt-5 grid gap-3 lg:grid-cols-4">
-        <div className="lg:col-span-2">
-          <label className="mb-1 block text-xs font-medium">Destination</label>
-          <DestinationSearch
-            placeholder="Where do you want to go?"
-            value={hydrated ? draft.destination : undefined}
-            onChange={(value) => update({ destination: value })}
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-medium">Date mode</label>
-          <div className="grid grid-cols-3 gap-2">
-            {(["exact", "weekend", "flexible"] as const).map((mode) => (
-              <Button
-                key={mode}
-                variant="outline"
-                size="sm"
-                className={cn(
-                  draft.dateMode === mode && "border-primary bg-primary/10"
-                )}
-                onClick={() => update({ dateMode: mode })}
-              >
-                {mode.charAt(0).toUpperCase() + mode.slice(1)}
-              </Button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-medium">Travelers</label>
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className={cn(
-                draft.travelers === "solo" && "border-primary bg-primary/10"
-              )}
-              onClick={() => update({ travelers: "solo" })}
-            >
-              Solo
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className={cn(
-                draft.travelers === "group" && "border-primary bg-primary/10"
-              )}
-              onClick={() => update({ travelers: "group" })}
-            >
-              Group
-            </Button>
-          </div>
-        </div>
-      </div>
+      <h1 className="text-2xl font-semibold tracking-tight">Where to?</h1>
 
       <div className="mt-4">
-        <Button onClick={handleCreateTrip}>Create Trip</Button>
+        <DestinationSearch
+          placeholder="Search a destination…"
+          value={hydrated ? draft.destination : undefined}
+          onChange={(value) => update({ destination: value })}
+        />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {DATE_MODES.map(({ value, icon: Icon, label }) => (
+          <Button
+            key={value}
+            variant="outline"
+            size="sm"
+            className={cn(
+              "gap-1.5",
+              draft.dateMode === value && "border-primary bg-primary/10"
+            )}
+            onClick={() => update({ dateMode: value })}
+          >
+            <Icon className="size-3.5" />
+            {label}
+          </Button>
+        ))}
+
+        <div className="mx-1 h-4 w-px bg-border" />
+
+        {TRAVELER_MODES.map(({ value, icon: Icon, label }) => (
+          <Button
+            key={value}
+            variant="outline"
+            size="sm"
+            className={cn(
+              "gap-1.5",
+              draft.travelers === value && "border-primary bg-primary/10"
+            )}
+            onClick={() => update({ travelers: value })}
+          >
+            <Icon className="size-3.5" />
+            {label}
+          </Button>
+        ))}
+
+        <Button className="ml-auto" onClick={handleCreateTrip}>
+          Plan Trip
+        </Button>
       </div>
     </section>
   )

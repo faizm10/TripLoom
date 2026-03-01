@@ -2,17 +2,42 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { motion, useScroll, useTransform } from "framer-motion"
-import { PlaneTakeoffIcon } from "lucide-react"
+import { LogOutIcon, PlaneTakeoffIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { createClient } from "@/lib/supabase/client"
+import type { User } from "@supabase/supabase-js"
 
 export function NavSection() {
   const { scrollY } = useScroll()
   const backdropOpacity = useTransform(scrollY, [0, 80], [0, 1])
+  const router = useRouter()
+  const [user, setUser] = React.useState<User | null>(null)
+  const [loading, setLoading] = React.useState(true)
+
+  React.useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user)
+      setLoading(false)
+    })
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  async function handleSignOut() {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    router.push("/")
+    router.refresh()
+  }
 
   return (
     <motion.header
-      className="fixed top-0 left-0 right-0 z-50 border-b border-border/0"
+      className="fixed top-0 left-0 right-0 z-50"
       style={{}}
     >
       <motion.div
@@ -33,13 +58,38 @@ export function NavSection() {
           <a href="#roadmap" className="hover:text-foreground transition-colors">Roadmap</a>
         </nav>
 
-        <Button asChild size="sm">
-          <Link href="/dashboard">
-            <PlaneTakeoffIcon className="size-3.5" />
-            Start Planning
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          {!loading && (
+            user ? (
+              <>
+                <Button asChild size="sm" variant="outline">
+                  <Link href="/dashboard">
+                    <PlaneTakeoffIcon className="size-3.5" />
+                    Dashboard
+                  </Link>
+                </Button>
+                <Button size="sm" variant="ghost" onClick={handleSignOut}>
+                  <LogOutIcon className="size-3.5" />
+                  <span className="hidden sm:inline">Sign Out</span>
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button asChild size="sm" variant="ghost">
+                  <Link href="/auth/login">Sign In</Link>
+                </Button>
+                <Button asChild size="sm">
+                  <Link href="/auth/signup">
+                    <PlaneTakeoffIcon className="size-3.5" />
+                    Get Started
+                  </Link>
+                </Button>
+              </>
+            )
+          )}
+        </div>
       </div>
     </motion.header>
   )
 }
+

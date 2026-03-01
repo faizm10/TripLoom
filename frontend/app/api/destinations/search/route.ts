@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server"
 
-const DUFFEL_BASE = "https://api.duffel.com"
-const DUFFEL_VERSION = "v2"
+const SERPAPI_BASE = "https://serpapi.com/search"
 
-function getDuffelToken(): string | undefined {
-  return process.env.DUFFEL_API_KEY || process.env.DUFFEL
+function getSerpApiKey(): string | undefined {
+  return process.env.SERPAPI_API_KEY || process.env.SERPAPI_KEY
 }
 
 export type DestinationSuggestion = {
@@ -17,38 +16,62 @@ export type DestinationSuggestion = {
   countryCode: string | null
 }
 
-type DuffelPlace = {
-  id: string
-  type: "airport" | "city"
+type SerpApiAirport = {
   name: string
-  iata_code: string
-  iata_country_code?: string
-  city_name?: string
-  city?: { name: string; iata_code: string }
+  id: string
+  city: string
+  city_id?: string
+  distance?: string
 }
 
-function normalizePlace(p: DuffelPlace): DestinationSuggestion {
-  const isCity = p.type === "city"
-  const name = isCity ? (p.name ?? p.city?.name ?? "") : p.name
-  const cityName = p.city_name ?? p.city?.name ?? null
-  const displayName =
-    cityName && !isCity
-      ? `${p.name} (${p.iata_code}), ${cityName}`
-      : `${name} (${p.iata_code})`
-  return {
-    id: p.id,
-    name,
+type SerpApiSuggestion = {
+  position?: number
+  name: string
+  type: "city" | "region"
+  description?: string
+  id: string
+  airports?: SerpApiAirport[]
+}
+
+function suggestionToDestinations(s: SerpApiSuggestion): DestinationSuggestion[] {
+  const out: DestinationSuggestion[] = []
+  const cityName = s.name
+  const displayName = s.description ? `${s.name} - ${s.description}` : s.name
+  const firstAirportIata = Array.isArray(s.airports) && s.airports.length > 0 ? s.airports[0].id : null
+
+  out.push({
+    id: s.id,
+    name: cityName,
     displayName,
-    type: p.type,
-    iataCode: p.iata_code ?? null,
-    cityName: cityName ?? null,
-    countryCode: p.iata_country_code ?? null,
+    type: "city",
+    iataCode: firstAirportIata,
+    cityName,
+    countryCode: null,
+  })
+
+  if (Array.isArray(s.airports)) {
+    for (const ap of s.airports) {
+      out.push({
+        id: ap.id,
+        name: ap.name,
+        displayName: `${ap.name} (${ap.id}), ${ap.city}`,
+        type: "airport",
+        iataCode: ap.id,
+        cityName: ap.city,
+        countryCode: null,
+      })
+    }
   }
+
+  return out
 }
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const q = searchParams.get("q")?.trim()
+  const airportsOnly =
+    searchParams.get("airports_only") === "1" ||
+    searchParams.get("airports_only") === "true"
 
   if (!q || q.length < 2) {
     return NextResponse.json(
@@ -57,35 +80,36 @@ export async function GET(request: Request) {
     )
   }
 
-  const token = getDuffelToken()
-  if (!token) {
+  const apiKey = getSerpApiKey()
+  if (!apiKey) {
     return NextResponse.json(
       {
         ok: false,
         error:
-          "Destination search requires Duffel API key. Set DUFFEL_API_KEY or DUFFEL in env.",
+          "Destination search requires SerpAPI key. Set SERPAPI_API_KEY or SERPAPI_KEY in env.",
       },
       { status: 503 }
     )
   }
 
   try {
-    const res = await fetch(
-      `${DUFFEL_BASE}/places/suggestions?${new URLSearchParams({ query: q })}`,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Duffel-Version": DUFFEL_VERSION,
-          Accept: "application/json",
-        },
-        cache: "no-store",
-      }
-    )
+    const params = new URLSearchParams({
+      engine: "google_flights_autocomplete",
+      q,
+      api_key: apiKey,
+      gl: "us",
+      hl: "en",
+      exclude_regions: "true",
+    })
+    const res = await fetch(`${SERPAPI_BASE}?${params}`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      cache: "no-store",
+    })
 
     const body = (await res.json().catch(() => null)) as
-      | { data?: DuffelPlace[] }
-      | { error?: { message?: string } }
+      | { suggestions?: SerpApiSuggestion[] }
+      | { error?: string }
       | null
 
     if (!res.ok) {
@@ -94,15 +118,21 @@ export async function GET(request: Request) {
           ok: false,
           error:
             body && typeof body === "object" && "error" in body
-              ? (body.error as { message?: string }).message
-              : `Duffel API error: ${res.status}`,
+              ? (body as { error?: string }).error
+              : `SerpAPI error: ${res.status}`,
         },
         { status: res.status >= 500 ? 502 : 400 }
       )
     }
 
-    const raw = body && "data" in body ? body.data ?? [] : []
-    const data = raw.map((p) => normalizePlace(p))
+    const raw = body && "suggestions" in body ? body.suggestions ?? [] : []
+    let data = raw
+      .filter((s) => s && s.name && s.id)
+      .flatMap((s) => suggestionToDestinations(s as SerpApiSuggestion))
+    if (airportsOnly) {
+      data = data.filter((s) => s.type === "airport")
+    }
+    data = data.slice(0, 20)
 
     return NextResponse.json({ ok: true, data })
   } catch (err) {

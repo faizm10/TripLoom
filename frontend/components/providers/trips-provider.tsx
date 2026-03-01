@@ -10,66 +10,29 @@ import type {
   TripFinanceAutomation,
 } from "@/lib/trips"
 import {
+  createTripInSupabase,
+  deleteTripInSupabase,
+  getTripsFromSupabase,
+  updateTripInSupabase,
+} from "@/lib/supabase-trips"
+import { createClient } from "@/lib/supabase/client"
+import { toast } from "sonner"
+import {
   coerceTripItineraryForTotalDays as coerceItinerary,
   computeItineraryDaysPlanned as computeDaysPlanned,
   getDestinationTimezone,
   getFinanceSummary,
   getTripFinance,
   getTripItineraryItems,
-  getTrips,
   isFinanceComplete,
   runFinanceGuardrails,
 } from "@/lib/trips"
-
-const STORAGE_KEY = "triploom_trips"
 
 function normalizeTransit(trip: Trip): Trip {
   const hasRoutes = Array.isArray(trip.transitRoutes)
   return {
     ...trip,
     transitSaved: hasRoutes ? (trip.transitRoutes?.length ?? 0) > 0 : trip.transitSaved,
-  }
-}
-
-function loadTrips(): Trip[] {
-  if (typeof window === "undefined") return getTrips()
-  const defaults = getTrips()
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw) as Trip[]
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const germanyDefault = defaults.find((t) => t.id === "germany-spring")
-        const tokyoDefault = defaults.find((t) => t.id === "tokyo-fall")
-        return parsed.map((t) =>
-          normalizeTransit(
-            (t.id === "toronto-spring" || t.id === "germany-spring") && germanyDefault
-              ? germanyDefault
-              : t.id === "tokyo-fall" &&
-                  tokyoDefault &&
-                  (!Array.isArray(t.itineraryItems) || t.itineraryItems.length === 0)
-                ? {
-                    ...t,
-                    itineraryItems: tokyoDefault.itineraryItems,
-                    itineraryDaysPlanned: tokyoDefault.itineraryDaysPlanned,
-                  }
-                : t
-          )
-        )
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return defaults.map(normalizeTransit)
-}
-
-function saveTrips(trips: Trip[]) {
-  if (typeof window === "undefined") return
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(trips))
-  } catch {
-    // ignore
   }
 }
 
@@ -107,15 +70,29 @@ type TripsContextValue = {
 const TripsContext = React.createContext<TripsContextValue | null>(null)
 
 export function TripsProvider({ children }: { children: React.ReactNode }) {
-  const [trips, setTrips] = React.useState<Trip[]>(getTrips)
+  const [trips, setTrips] = React.useState<Trip[]>([])
+  const [tripsLoaded, setTripsLoaded] = React.useState(false)
 
-  React.useEffect(() => {
-    setTrips(loadTrips())
+  const fetchTrips = React.useCallback(() => {
+    getTripsFromSupabase()
+      .then((list) => setTrips(list.map(normalizeTransit)))
+      .catch(() => setTrips([]))
+      .finally(() => setTripsLoaded(true))
   }, [])
 
   React.useEffect(() => {
-    saveTrips(trips)
-  }, [trips])
+    fetchTrips()
+  }, [fetchTrips])
+
+  React.useEffect(() => {
+    const supabase = createClient()
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      fetchTrips()
+    })
+    return () => subscription.unsubscribe()
+  }, [fetchTrips])
 
   const getTripById = React.useCallback(
     (id: string) => trips.find((t) => t.id === id),
@@ -168,32 +145,59 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
     }
 
     setTrips((prev) => [next, ...prev.filter((trip) => trip.id !== next.id)])
+    createTripInSupabase({
+      id: next.id,
+      destination: next.destination,
+      startDate: next.startDate,
+      endDate: next.endDate,
+      timezone: next.timezone ?? "UTC",
+    }).catch((e) => {
+      toast.error(
+        "Trip saved locally but could not sync to cloud.",
+        { description: e instanceof Error ? e.message : undefined }
+      )
+    })
     return next
   }, [])
 
-  const updateTrip = React.useCallback(
-    (id: string, partial: Partial<Trip>) => {
-      setTrips((prev) =>
-        prev.map((t) => {
-          if (t.id !== id) return t
-          const merged: Trip = {
-            ...t,
-            ...partial,
-            lastUpdated: new Date().toISOString().slice(0, 10),
-          }
-          if (typeof partial.totalDays === "number" && Array.isArray(t.itineraryItems)) {
-            merged.itineraryItems = coerceItinerary({
-              ...merged,
-              itineraryItems: t.itineraryItems,
+  const updateTrip = React.useCallback((id: string, partial: Partial<Trip>) => {
+    const shouldPersistToDb =
+      "destination" in partial ||
+      "startDate" in partial ||
+      "endDate" in partial ||
+      "timezone" in partial
+    setTrips((prev) =>
+      prev.map((t) => {
+        if (t.id !== id) return t
+        const merged: Trip = {
+          ...t,
+          ...partial,
+          lastUpdated: new Date().toISOString().slice(0, 10),
+        }
+        if (typeof partial.totalDays === "number" && Array.isArray(t.itineraryItems)) {
+          merged.itineraryItems = coerceItinerary({
+            ...merged,
+            itineraryItems: t.itineraryItems,
+          })
+          merged.itineraryDaysPlanned = computeDaysPlanned(merged.itineraryItems)
+        }
+        const next = normalizeTransit(merged)
+        if (shouldPersistToDb) {
+          updateTripInSupabase(id, {
+            destination: next.destination,
+            startDate: next.startDate,
+            endDate: next.endDate,
+            timezone: next.timezone ?? undefined,
+          }).catch((e) => {
+            toast.error("Could not update trip in cloud.", {
+              description: e instanceof Error ? e.message : undefined,
             })
-            merged.itineraryDaysPlanned = computeDaysPlanned(merged.itineraryItems)
-          }
-          return normalizeTransit(merged)
-        })
-      )
-    },
-    []
-  )
+          })
+        }
+        return next
+      })
+    )
+  }, [])
 
   const setTripItineraryItems = React.useCallback((id: string, items: TripItineraryItem[]) => {
     setTrips((prev) =>
@@ -279,6 +283,11 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
 
   const deleteTrip = React.useCallback((id: string) => {
     setTrips((prev) => prev.filter((trip) => trip.id !== id))
+    deleteTripInSupabase(id).catch((e) => {
+      toast.error("Could not delete trip from cloud.", {
+        description: e instanceof Error ? e.message : undefined,
+      })
+    })
   }, [])
 
   const withFinanceMirrors = React.useCallback((trip: Trip, finance: TripFinance): Trip => {
@@ -492,7 +501,7 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
 
 export function useTrips(): Trip[] {
   const ctx = React.useContext(TripsContext)
-  if (!ctx) return getTrips()
+  if (!ctx) return []
   return ctx.trips
 }
 

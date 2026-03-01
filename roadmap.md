@@ -15,7 +15,7 @@ Build an all-in-one travel platform for first-time travelers that plans, books, 
 - **Maps:** Google Maps JS SDK
 
 ## API Providers
-- **Flights (Booking):** Duffel API
+- **Flights (Booking):** SerpAPI Google Flights
 - **Hotels (Booking):** Booking.com Demand API
 - **Transit:** Google Directions API + Transitland Routing API
 - **Currency Exchange:** Fixer API (or ExchangeRatesAPI)
@@ -27,7 +27,7 @@ Build an all-in-one travel platform for first-time travelers that plans, books, 
 - **Voice (optional):** OpenAI Realtime API
 
 ## Key Features
-- **Flight search & booking:** one-way, round-trip, multi-city (Duffel slices)
+- **Flight search & booking:** one-way, round-trip, multi-city (SerpAPI Google Flights)
 - **Hotel search & booking**
 - **Itinerary builder:** day-by-day plan + timeline view
 - **Transit routing:** best public transit paths per day
@@ -38,7 +38,7 @@ Build an all-in-one travel platform for first-time travelers that plans, books, 
 - **Group travel:** shared itineraries, approvals, split payments, group limits handling
 
 ## Feature Breakdown (What Each Should Include)
-### Flight Search & Booking (Duffel)
+### Flight Search & Booking (SerpAPI Google Flights)
 - Search types: one-way, round-trip, multi-city (slices)
 - Filters: price, stops, duration, baggage, departure windows
 - Offer selection: “best pick” badge + clear tradeoffs
@@ -103,7 +103,7 @@ Build an all-in-one travel platform for first-time travelers that plans, books, 
 - Trip data schema
 - Base UI shell + navigation
 
-### Milestone 2 — Flights (Duffel)
+### Milestone 2 — Flights (SerpAPI)
 - Offer request + multi-city slices
 - Offer listing + selection
 - Booking flow (create order)

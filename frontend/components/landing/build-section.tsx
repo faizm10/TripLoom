@@ -18,7 +18,7 @@ const features = [
     icon: PlaneIcon,
     title: "Flights",
     description:
-      "One-way, round-trip, and multi-city search via Duffel. Compare stops, baggage, and duration with clear tradeoffs.",
+      "One-way, round-trip, and multi-city search via SerpAPI Google Flights. Compare stops, baggage, and duration with clear tradeoffs.",
     color: "text-blue-500",
     bg: "bg-blue-500/10",
   },

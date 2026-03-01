@@ -11,6 +11,7 @@ export type SavedFlightRow = {
   stops: string
   airline: string
   cost: string
+  bookUrl: string | null
 }
 
 type TripFlightRow = {
@@ -41,6 +42,7 @@ function rowToSaved(row: TripFlightRow): SavedFlightRow {
     stops: row.stops ?? "",
     airline: row.airline ?? "",
     cost: row.cost ?? "",
+    bookUrl: row.book_url ?? null,
   }
 }
 
@@ -114,6 +116,26 @@ export async function saveTripFlightToSupabase(
     },
     { onConflict: "id" }
   )
+  if (error) throw new Error(error.message)
+}
+
+/**
+ * Update a saved flight in the DB (e.g. change date). Only provided fields are updated.
+ */
+export async function updateTripFlightInSupabase(
+  tripId: string,
+  id: string,
+  payload: { date?: string }
+): Promise<void> {
+  const supabase = createClient()
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (payload.date != null) updates.flight_date = payload.date
+  if (Object.keys(updates).length <= 1) return
+  const { error } = await supabase
+    .from("trip_flights")
+    .update(updates)
+    .eq("trip_id", tripId)
+    .eq("id", id)
   if (error) throw new Error(error.message)
 }
 

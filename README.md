@@ -4,7 +4,7 @@
 
 ## Stack
 
-Next.js 16, React 19, TypeScript, Tailwind CSS, Duffel API, SerpAPI (Google Flights), FlightAware AeroAPI, Google Maps API
+Next.js 16, React 19, TypeScript, Tailwind CSS, SerpAPI (Google Flights), FlightAware AeroAPI, Google Maps API
 
 ## Run
 
@@ -19,13 +19,11 @@ npm run dev
 `frontend/.env.local`
 ```env
 # Required
-DUFFEL_API_KEY=
 SERPAPI_API_KEY=
 AERO_API_KEY=
 GOOGLE_MAPS_API_KEY=
 
 # Optional aliases / fallbacks
-DUFFEL=
 SERP_API_KEY=
 AEROAPI_KEY=
 FLIGHT_STATUS_API_KEY=

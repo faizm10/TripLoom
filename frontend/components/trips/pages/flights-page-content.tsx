@@ -267,7 +267,6 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   const [manualFilterAirline, setManualFilterAirline] = useState("")
   const [manualFilterMaxPrice, setManualFilterMaxPrice] = useState("")
 
-  const [flightApi, setFlightApi] = useState<"duffel" | "serpapi">("duffel")
   const [mounted, setMounted] = useState(false)
   const [expandedManualOfferIds, setExpandedManualOfferIds] = useState<Set<string>>(new Set())
   // SerpAPI round trip two-step: outbound selected → load return flights
@@ -308,7 +307,7 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   }
 
   const isSerpRoundTripTwoStep =
-    flightApi === "serpapi" &&
+    tripType === "round_trip" &&
     tripType === "round_trip" &&
     returnDate.trim() !== ""
 
@@ -496,8 +495,8 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
     setReturnError(null)
     setSelectedReturnOfferId(null)
     try {
-      const useSerpApi = flightApi === "serpapi" && tripType !== "multi_city"
-      const endpoint = useSerpApi ? "/api/flights/serp/search" : "/api/flights/search"
+      const useSerpApi = tripType !== "multi_city"
+      const endpoint = useSerpApi ? "/api/flights/serp/search" : "/api/flights/serp/search"
       const payload: Record<string, unknown> = {
         slices,
         adults,
@@ -1004,35 +1003,6 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
             <SearchIcon className="size-3.5" />
             Manual search
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground text-xs font-medium">API:</span>
-            <div className="border-input flex rounded-none border bg-muted/30 p-0.5">
-              <button
-                type="button"
-                onClick={() => setFlightApi("duffel")}
-                className={cn(
-                  "rounded-none px-2.5 py-1 text-xs font-medium transition-colors",
-                  flightApi === "duffel"
-                    ? "bg-primary text-primary-foreground"
-                    : "hover:bg-muted"
-                )}
-              >
-                Duffel
-              </button>
-              <button
-                type="button"
-                onClick={() => setFlightApi("serpapi")}
-                className={cn(
-                  "rounded-none px-2.5 py-1 text-xs font-medium transition-colors",
-                  flightApi === "serpapi"
-                    ? "bg-primary text-primary-foreground"
-                    : "hover:bg-muted"
-                )}
-              >
-                SerpAPI
-              </button>
-            </div>
-          </div>
         </div>
 
         <div className="mt-4 space-y-6">
@@ -1045,9 +1015,9 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
               <p className="text-muted-foreground text-xs">
                 One way, round trip, or multi city for {trip.destination}. Select an offer and save your preferred options.
               </p>
-              {flightApi === "serpapi" && tripType === "multi_city" && (
+              {tripType === "multi_city" && (
                 <p className="text-muted-foreground text-xs">
-                  Multi-city currently searches via Duffel even when SerpAPI is selected.
+                  Multi-city search uses the first leg only.
                 </p>
               )}
             </CardHeader>

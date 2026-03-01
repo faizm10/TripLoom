@@ -14,7 +14,7 @@ const milestones: { label: string; detail: string; status: Status }[] = [
   },
   {
     label: "Flights",
-    detail: "Duffel offer requests, multi-city slices, booking flow.",
+    detail: "SerpAPI Google Flights search, return flights, booking options.",
     status: "done",
   },
   {

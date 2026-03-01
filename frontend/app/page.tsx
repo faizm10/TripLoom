@@ -1,7 +1,9 @@
 import type { Metadata } from "next"
 
 import { BuildSection } from "@/components/landing/build-section"
+import { CtaSection } from "@/components/landing/cta-section"
 import { HeroSection } from "@/components/landing/hero-section"
+import { NavSection } from "@/components/landing/nav-section"
 import { RoadmapSection } from "@/components/landing/roadmap-section"
 import { WhySection } from "@/components/landing/why-section"
 
@@ -9,10 +11,6 @@ export const metadata: Metadata = {
   title: "TripLoom | Plan, Book, and Manage Travel",
   description:
     "TripLoom is an AI travel platform for first-time travelers to plan itineraries, compare flights and hotels, route transit, and explore nearby attractions.",
-}
-
-function HalfDottedDivider() {
-  return <div className="mx-auto h-px w-1/2 border-t border-dotted border-border" />
 }
 
 export default function Page() {
@@ -37,13 +35,12 @@ export default function Page() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
       />
+      <NavSection />
       <HeroSection />
-      <HalfDottedDivider />
       <BuildSection />
-      <HalfDottedDivider />
       <WhySection />
-      <HalfDottedDivider />
       <RoadmapSection />
+      <CtaSection />
     </main>
   )
 }

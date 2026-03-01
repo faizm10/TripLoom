@@ -23,12 +23,18 @@ import {
 } from "@/components/dashboard-home/destination-search"
 
 import type { Trip } from "@/lib/trips"
+import {
+  deleteTripFlightFromSupabase,
+  getTripFlightsFromSupabase,
+  saveTripFlightToSupabase,
+} from "@/lib/supabase-trip-flights"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { FlightOffer } from "@/lib/flights"
 import { cn } from "@/lib/utils"
+import { toast } from "sonner"
 
 type Place = { displayName: string; iataCode: string }
 type TripType = "one_way" | "round_trip" | "multi_city"
@@ -279,6 +285,12 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   // Tab flow for SerpAPI round trip: Outbound → Return → Summary
   const [flightStepTab, setFlightStepTab] = useState<"outbound" | "return" | "summary">("outbound")
   useEffect(() => setMounted(true), [])
+  useEffect(() => {
+    if (!trip.id) return
+    getTripFlightsFromSupabase(trip.id)
+      .then((list) => setSavedFlights(list))
+      .catch(() => {})
+  }, [trip.id])
   const [lookupFlightNumber, setLookupFlightNumber] = useState("")
   const [lookupDate, setLookupDate] = useState("")
   const [lookupLoading, setLookupLoading] = useState(false)
@@ -307,7 +319,6 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   }
 
   const isSerpRoundTripTwoStep =
-    tripType === "round_trip" &&
     tripType === "round_trip" &&
     returnDate.trim() !== ""
 
@@ -637,67 +648,77 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
 
   const saveFlightChoice = (offer: FlightOffer, source: string) => {
     const row = getOfferRow(offer)
-    const id = `${source}:${offer.id}:${row.dateStr}`
+    const id = `${trip.id}:${source}:${offer.id}:${row.dateStr}`
+    const entry = {
+      id,
+      source,
+      route: row.route,
+      date: row.dateStr,
+      departure: row.departure,
+      arrival: row.arrival,
+      duration: row.duration,
+      stops: getStopsLabel(offer),
+      airline: offer.owner?.name ?? "Airline",
+      cost: `${offer.totalAmount} ${offer.totalCurrency}`,
+    }
     setSavedFlights((prev) => {
       if (prev.some((x) => x.id === id)) return prev
-      return [
-        {
-          id,
-          source,
-          route: row.route,
-          date: row.dateStr,
-          departure: row.departure,
-          arrival: row.arrival,
-          duration: row.duration,
-          stops: getStopsLabel(offer),
-          airline: offer.owner?.name ?? "Airline",
-          cost: `${offer.totalAmount} ${offer.totalCurrency}`,
-        },
-        ...prev,
-      ]
+      return [entry, ...prev]
     })
     setSaveConfirmation(`Saved ${source} flight.`)
+    saveTripFlightToSupabase(trip.id, {
+      ...entry,
+      offerId: offer.id,
+      bookUrl: offer.bookUrl,
+    }).catch((e) => toast.error(e instanceof Error ? e.message : "Could not save flight to cloud."))
   }
 
   const saveRoundTripSelection = () => {
     if (!selectedOutboundOffer || !selectedReturnOffer) return
     const out = getOfferRow(selectedOutboundOffer)
     const ret = getOfferRow(selectedReturnOffer)
-    const outId = `outbound:${selectedOutboundOffer.id}:${out.dateStr}`
-    const retId = `inbound:${selectedReturnOffer.id}:${ret.dateStr}`
+    const outId = `${trip.id}:outbound:${selectedOutboundOffer.id}:${out.dateStr}`
+    const retId = `${trip.id}:inbound:${selectedReturnOffer.id}:${ret.dateStr}`
+    const outEntry = {
+      id: outId,
+      source: "outbound" as const,
+      route: out.route,
+      date: out.dateStr,
+      departure: out.departure,
+      arrival: out.arrival,
+      duration: out.duration,
+      stops: getStopsLabel(selectedOutboundOffer),
+      airline: selectedOutboundOffer.owner?.name ?? "Airline",
+      cost: `${selectedOutboundOffer.totalAmount} ${selectedOutboundOffer.totalCurrency}`,
+    }
+    const retEntry = {
+      id: retId,
+      source: "inbound" as const,
+      route: ret.route,
+      date: ret.dateStr,
+      departure: ret.departure,
+      arrival: ret.arrival,
+      duration: ret.duration,
+      stops: getStopsLabel(selectedReturnOffer),
+      airline: selectedReturnOffer.owner?.name ?? "Airline",
+      cost: `${selectedReturnOffer.totalAmount} ${selectedReturnOffer.totalCurrency}`,
+    }
     setSavedFlights((prev) => {
       const next = [...prev]
-      if (!next.some((x) => x.id === outId)) {
-        next.unshift({
-          id: outId,
-          source: "outbound",
-          route: out.route,
-          date: out.dateStr,
-          departure: out.departure,
-          arrival: out.arrival,
-          duration: out.duration,
-          stops: getStopsLabel(selectedOutboundOffer),
-          airline: selectedOutboundOffer.owner?.name ?? "Airline",
-          cost: `${selectedOutboundOffer.totalAmount} ${selectedOutboundOffer.totalCurrency}`,
-        })
-      }
-      if (!next.some((x) => x.id === retId)) {
-        next.unshift({
-          id: retId,
-          source: "inbound",
-          route: ret.route,
-          date: ret.dateStr,
-          departure: ret.departure,
-          arrival: ret.arrival,
-          duration: ret.duration,
-          stops: getStopsLabel(selectedReturnOffer),
-          airline: selectedReturnOffer.owner?.name ?? "Airline",
-          cost: `${selectedReturnOffer.totalAmount} ${selectedReturnOffer.totalCurrency}`,
-        })
-      }
+      if (!next.some((x) => x.id === outId)) next.unshift(outEntry)
+      if (!next.some((x) => x.id === retId)) next.unshift(retEntry)
       return next
     })
     setSaveConfirmation("Saved outbound and inbound flights.")
+    const persist = () => {
+      saveTripFlightToSupabase(trip.id, { ...outEntry, offerId: selectedOutboundOffer.id, bookUrl: selectedOutboundOffer.bookUrl }).catch((e) =>
+        toast.error(e instanceof Error ? e.message : "Could not save flight to cloud.")
+      )
+      saveTripFlightToSupabase(trip.id, { ...retEntry, offerId: selectedReturnOffer.id, bookUrl: selectedReturnOffer.bookUrl }).catch((e) =>
+        toast.error(e instanceof Error ? e.message : "Could not save flight to cloud.")
+      )
+    }
+    persist()
   }
 
   if (!mounted) {
@@ -1875,9 +1896,12 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                   variant="outline"
                   size="sm"
                   className="rounded-none"
-                  onClick={() =>
+                  onClick={() => {
                     setSavedFlights((prev) => prev.filter((x) => x.id !== f.id))
-                  }
+                    deleteTripFlightFromSupabase(trip.id, f.id).catch((e) =>
+                      toast.error(e instanceof Error ? e.message : "Could not remove flight from cloud.")
+                    )
+                  }}
                 >
                   Remove
                 </Button>

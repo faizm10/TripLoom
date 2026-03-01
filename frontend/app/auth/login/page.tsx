@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createClient } from "@/lib/supabase/client"
 
-export default function LoginPage() {
+function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const callbackError = searchParams.get("error")
@@ -158,5 +158,17 @@ export default function LoginPage() {
         </p>
       </motion.div>
     </div>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <React.Suspense fallback={
+      <div className="flex min-h-screen items-center justify-center">
+        <span className="text-muted-foreground text-sm">Loading…</span>
+      </div>
+    }>
+      <LoginForm />
+    </React.Suspense>
   )
 }

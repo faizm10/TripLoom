@@ -25,9 +25,11 @@ const DEBOUNCE_MS = 280
 const MIN_QUERY_LENGTH = 2
 
 async function searchDestinations(
-  query: string
+  query: string,
+  options?: { airportsOnly?: boolean }
 ): Promise<DestinationSuggestion[]> {
   const params = new URLSearchParams({ q: query })
+  if (options?.airportsOnly) params.set("airports_only", "1")
   const res = await fetch(`/api/destinations/search?${params}`)
   const json = await res.json()
   if (!res.ok) throw new Error(json?.error ?? "Search failed")
@@ -40,6 +42,7 @@ export function DestinationSearch({
   onSelect,
   placeholder = "Where do you want to go?",
   className,
+  airportsOnly = false,
   ...inputProps
 }: {
   value?: string
@@ -47,6 +50,8 @@ export function DestinationSearch({
   onSelect?: (suggestion: DestinationSuggestion) => void
   placeholder?: string
   className?: string
+  /** When true, only airport suggestions are returned (for flight from/to). */
+  airportsOnly?: boolean
 } & Omit<React.ComponentProps<typeof Input>, "value" | "onChange" | "onSelect">) {
   const [inputValue, setInputValue] = useState(value ?? "")
   const [query, setQuery] = useState("")
@@ -79,20 +84,23 @@ export function DestinationSearch({
     }
   }, [inputValue])
 
-  const runSearch = useCallback(async (q: string) => {
-    setLoading(true)
-    try {
-      const data = await searchDestinations(q)
-      setResults(data)
-      setHighlightIndex(0)
-      setOpen(true)
-    } catch {
-      setResults([])
-      setOpen(false)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const runSearch = useCallback(
+    async (q: string) => {
+      setLoading(true)
+      try {
+        const data = await searchDestinations(q, { airportsOnly })
+        setResults(data)
+        setHighlightIndex(0)
+        setOpen(true)
+      } catch {
+        setResults([])
+        setOpen(false)
+      } finally {
+        setLoading(false)
+      }
+    },
+    [airportsOnly]
+  )
 
   useEffect(() => {
     if (!query) return

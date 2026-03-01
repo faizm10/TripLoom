@@ -493,7 +493,11 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
   const handleManualSearch = async () => {
     const slices = buildSlices()
     if (slices.length === 0) {
-      setError("Please fill all origin, destination, and date fields.")
+      if (!origin?.iataCode || !destination?.iataCode) {
+        setError("Please select an origin and destination from the dropdown (city or airport) so we have valid codes for search.")
+      } else {
+        setError("Please fill all origin, destination, and date fields.")
+      }
       return
     }
     setError(null)
@@ -1064,7 +1068,8 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                   <div className="space-y-2">
                     <Label>From</Label>
                     <DestinationSearch
-                      placeholder="City or airport"
+                      airportsOnly
+                      placeholder="Airport"
                       value={origin?.displayName}
                       onChange={(v) =>
                         setOrigin((prev) => (prev ? { ...prev, displayName: v } : null))
@@ -1076,7 +1081,8 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                   <div className="space-y-2">
                     <Label>To</Label>
                     <DestinationSearch
-                      placeholder="City or airport"
+                      airportsOnly
+                      placeholder="Airport"
                       value={destination?.displayName}
                       onChange={(v) =>
                         setDestination((prev) =>
@@ -1119,7 +1125,8 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                   <div className="space-y-2">
                     <Label>From</Label>
                     <DestinationSearch
-                      placeholder="City or airport"
+                      airportsOnly
+                      placeholder="Airport"
                       value={origin?.displayName}
                       onChange={(v) =>
                         setOrigin((prev) => (prev ? { ...prev, displayName: v } : null))
@@ -1131,7 +1138,8 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                   <div className="space-y-2">
                     <Label>To</Label>
                     <DestinationSearch
-                      placeholder="City or airport"
+                      airportsOnly
+                      placeholder="Airport"
                       value={destination?.displayName}
                       onChange={(v) =>
                         setDestination((prev) =>
@@ -1193,7 +1201,8 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                         <div className="space-y-1">
                           <Label className="text-[11px]">From</Label>
                           <DestinationSearch
-                            placeholder="Origin"
+                            airportsOnly
+                            placeholder="Airport"
                             value={leg.origin?.displayName}
                             onChange={(v) =>
                               updateLeg(index, {
@@ -1214,7 +1223,8 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
                         <div className="space-y-1">
                           <Label className="text-[11px]">To</Label>
                           <DestinationSearch
-                            placeholder="Destination"
+                            airportsOnly
+                            placeholder="Airport"
                             value={leg.destination?.displayName}
                             onChange={(v) =>
                               updateLeg(index, {

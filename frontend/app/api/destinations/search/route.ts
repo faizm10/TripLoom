@@ -37,13 +37,14 @@ function suggestionToDestinations(s: SerpApiSuggestion): DestinationSuggestion[]
   const out: DestinationSuggestion[] = []
   const cityName = s.name
   const displayName = s.description ? `${s.name} - ${s.description}` : s.name
+  const firstAirportIata = Array.isArray(s.airports) && s.airports.length > 0 ? s.airports[0].id : null
 
   out.push({
     id: s.id,
     name: cityName,
     displayName,
     type: "city",
-    iataCode: null,
+    iataCode: firstAirportIata,
     cityName,
     countryCode: null,
   })
@@ -68,6 +69,9 @@ function suggestionToDestinations(s: SerpApiSuggestion): DestinationSuggestion[]
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const q = searchParams.get("q")?.trim()
+  const airportsOnly =
+    searchParams.get("airports_only") === "1" ||
+    searchParams.get("airports_only") === "true"
 
   if (!q || q.length < 2) {
     return NextResponse.json(
@@ -122,10 +126,13 @@ export async function GET(request: Request) {
     }
 
     const raw = body && "suggestions" in body ? body.suggestions ?? [] : []
-    const data = raw
+    let data = raw
       .filter((s) => s && s.name && s.id)
       .flatMap((s) => suggestionToDestinations(s as SerpApiSuggestion))
-      .slice(0, 20)
+    if (airportsOnly) {
+      data = data.filter((s) => s.type === "airport")
+    }
+    data = data.slice(0, 20)
 
     return NextResponse.json({ ok: true, data })
   } catch (err) {

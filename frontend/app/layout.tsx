@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { Geist, Geist_Mono, Outfit } from "next/font/google"
 import { TripsProvider } from "@/components/providers/trips-provider"
 import { Toaster } from "@/components/ui/sonner"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import "./globals.css"
 
 const outfit = Outfit({ subsets: ["latin"], variable: "--font-sans" })
@@ -90,8 +91,10 @@ export default function RootLayout({
     <html lang="en" className={outfit.variable} suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <TripsProvider>
-          {children}
-          <Toaster richColors position="top-right" />
+          <TooltipProvider>
+            {children}
+            <Toaster richColors position="top-right" />
+          </TooltipProvider>
         </TripsProvider>
       </body>
     </html>

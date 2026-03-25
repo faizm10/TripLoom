@@ -11,10 +11,10 @@ export function DashboardHomeContent() {
 
   return (
     <div className="space-y-4">
-      <NewTripCard />
-      {mostActiveTrip && (
-        <ContinuePlanningCard trip={mostActiveTrip} />
-      )}
+      <div className={mostActiveTrip ? "grid gap-4 md:grid-cols-2" : undefined}>
+        <NewTripCard />
+        {mostActiveTrip && <ContinuePlanningCard trip={mostActiveTrip} />}
+      </div>
       <TripListSection trips={trips} />
     </div>
   )

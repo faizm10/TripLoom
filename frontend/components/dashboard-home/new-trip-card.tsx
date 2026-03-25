@@ -3,6 +3,13 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
+import {
+  CalendarCheckIcon,
+  CalendarRangeIcon,
+  CalendarSearchIcon,
+  UserIcon,
+  UsersIcon,
+} from "lucide-react"
 
 import { useCreateTrip } from "@/components/providers/trips-provider"
 import { cn } from "@/lib/utils"
@@ -14,6 +21,17 @@ import {
 } from "@/lib/new-trip-draft"
 import { Button } from "@/components/ui/button"
 import { DestinationSearch } from "@/components/dashboard-home/destination-search"
+
+const DATE_MODES = [
+  { value: "exact" as const, label: "Exact", icon: CalendarCheckIcon },
+  { value: "weekend" as const, label: "Weekend", icon: CalendarRangeIcon },
+  { value: "flexible" as const, label: "Flexible", icon: CalendarSearchIcon },
+]
+
+const TRAVELER_MODES = [
+  { value: "solo" as const, label: "Solo", icon: UserIcon },
+  { value: "group" as const, label: "Group", icon: UsersIcon },
+]
 
 export function NewTripCard() {
   const router = useRouter()
@@ -57,86 +75,61 @@ export function NewTripCard() {
     })
 
     clearNewTripDraft()
-    setDraft({
-      destination: "",
-      dateMode: "exact",
-      travelers: "solo",
-    })
+    setDraft({ destination: "", dateMode: "exact", travelers: "solo" })
     toast.success("Trip created.")
     router.push(`/trips/${trip.id}`)
   }
 
   return (
     <section className="rounded-sm border bg-card p-5 sm:p-6">
-      <p className="text-xs font-medium tracking-widest text-muted-foreground uppercase">
-        Plan a New Trip
-      </p>
-      <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
-        Start in 20 seconds
-      </h1>
-      <p className="mt-2 text-sm text-muted-foreground">
-        Pick destination, dates, and travelers. TripLoom builds your guided flow
-        instantly.
-      </p>
+      <h1 className="text-2xl font-semibold tracking-tight">Where to?</h1>
 
-      <div className="mt-5 grid gap-3 lg:grid-cols-4">
-        <div className="lg:col-span-2">
-          <label className="mb-1 block text-xs font-medium">Destination</label>
-          <DestinationSearch
-            placeholder="Where do you want to go?"
-            value={hydrated ? draft.destination : undefined}
-            onChange={(value) => update({ destination: value })}
-          />
-        </div>
+      <div className="mt-4 space-y-3">
+        <DestinationSearch
+          placeholder="Search destination…"
+          value={hydrated ? draft.destination : undefined}
+          onChange={(value) => update({ destination: value })}
+        />
 
-        <div>
-          <label className="mb-1 block text-xs font-medium">Date mode</label>
-          <div className="grid grid-cols-3 gap-2">
-            {(["exact", "weekend", "flexible"] as const).map((mode) => (
-              <Button
-                key={mode}
-                variant="outline"
-                size="sm"
-                className={cn(
-                  draft.dateMode === mode && "border-primary bg-primary/10"
-                )}
-                onClick={() => update({ dateMode: mode })}
-              >
-                {mode.charAt(0).toUpperCase() + mode.slice(1)}
-              </Button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <label className="mb-1 block text-xs font-medium">Travelers</label>
-          <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-wrap gap-2">
+          {DATE_MODES.map(({ value, label, icon: Icon }) => (
             <Button
+              key={value}
               variant="outline"
               size="sm"
               className={cn(
-                draft.travelers === "solo" && "border-primary bg-primary/10"
+                "gap-1.5",
+                draft.dateMode === value && "border-primary bg-primary/10"
               )}
-              onClick={() => update({ travelers: "solo" })}
+              onClick={() => update({ dateMode: value })}
             >
-              Solo
+              <Icon className="size-3.5" />
+              {label}
             </Button>
+          ))}
+
+          <div className="mx-1 border-l" />
+
+          {TRAVELER_MODES.map(({ value, label, icon: Icon }) => (
             <Button
+              key={value}
               variant="outline"
               size="sm"
               className={cn(
-                draft.travelers === "group" && "border-primary bg-primary/10"
+                "gap-1.5",
+                draft.travelers === value && "border-primary bg-primary/10"
               )}
-              onClick={() => update({ travelers: "group" })}
+              onClick={() => update({ travelers: value })}
             >
-              Group
+              <Icon className="size-3.5" />
+              {label}
             </Button>
-          </div>
+          ))}
         </div>
-      </div>
 
-      <div className="mt-4">
-        <Button onClick={handleCreateTrip}>Create Trip</Button>
+        <Button className="w-full sm:w-auto" onClick={handleCreateTrip}>
+          Create Trip
+        </Button>
       </div>
     </section>
   )

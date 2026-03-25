@@ -23,3 +23,4 @@ export {
 } from "./utils"
 export { SortableTh } from "./SortableTh"
 export { SavedFlightsCard } from "./SavedFlightsCard"
+export { ManualFlightEntryForm } from "./ManualFlightEntryForm"

@@ -1,6 +1,8 @@
 import type { Metadata } from "next"
 import { Geist, Geist_Mono, Outfit } from "next/font/google"
+import { ThemeProvider } from "next-themes"
 import { TripsProvider } from "@/components/providers/trips-provider"
+import { ThemeToggle } from "@/components/theme/theme-toggle"
 import { Toaster } from "@/components/ui/sonner"
 import "./globals.css"
 
@@ -89,10 +91,19 @@ export default function RootLayout({
   return (
     <html lang="en" className={outfit.variable} suppressHydrationWarning>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
-        <TripsProvider>
-          {children}
-          <Toaster richColors position="top-right" />
-        </TripsProvider>
+        <ThemeProvider
+          attribute="data-theme"
+          defaultTheme="system"
+          enableSystem
+          storageKey="triploom-theme"
+          themes={["light", "dark"]}
+        >
+          <TripsProvider>
+            {children}
+            <ThemeToggle />
+            <Toaster richColors position="top-right" />
+          </TripsProvider>
+        </ThemeProvider>
       </body>
     </html>
   )

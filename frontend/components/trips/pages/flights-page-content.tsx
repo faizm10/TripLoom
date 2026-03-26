@@ -53,6 +53,7 @@ import {
   MIN_DATE,
   SortableTh,
   SavedFlightsCard,
+  ManualFlightEntryForm,
 } from "./flights"
 
 const minDate = MIN_DATE
@@ -848,6 +849,11 @@ export function FlightsPageContent({ trip: tripProp }: { trip: Trip }) {
         onFlightsChange={setSavedFlights}
         onEditingFlightIdChange={setEditingFlightId}
         onEditingDateChange={setEditingDate}
+      />
+
+      <ManualFlightEntryForm
+        tripId={trip.id}
+        onFlightSaved={(flight) => setSavedFlights((prev) => [flight, ...prev])}
       />
 
       {/* Manual search header */}

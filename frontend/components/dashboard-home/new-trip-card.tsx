@@ -4,11 +4,11 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 import {
-  CalendarCheck,
-  CalendarRange,
-  CalendarSearch,
-  User,
-  Users,
+  CalendarCheckIcon,
+  CalendarRangeIcon,
+  CalendarSearchIcon,
+  UserIcon,
+  UsersIcon,
 } from "lucide-react"
 
 import { useCreateTrip } from "@/components/providers/trips-provider"
@@ -23,15 +23,15 @@ import { Button } from "@/components/ui/button"
 import { DestinationSearch } from "@/components/dashboard-home/destination-search"
 
 const DATE_MODES = [
-  { value: "exact", icon: CalendarCheck, label: "Exact" },
-  { value: "weekend", icon: CalendarRange, label: "Weekend" },
-  { value: "flexible", icon: CalendarSearch, label: "Flexible" },
-] as const
+  { value: "exact" as const, label: "Exact", icon: CalendarCheckIcon },
+  { value: "weekend" as const, label: "Weekend", icon: CalendarRangeIcon },
+  { value: "flexible" as const, label: "Flexible", icon: CalendarSearchIcon },
+]
 
 const TRAVELER_MODES = [
-  { value: "solo", icon: User, label: "Solo" },
-  { value: "group", icon: Users, label: "Group" },
-] as const
+  { value: "solo" as const, label: "Solo", icon: UserIcon },
+  { value: "group" as const, label: "Group", icon: UsersIcon },
+]
 
 export function NewTripCard() {
   const router = useRouter()
@@ -75,11 +75,7 @@ export function NewTripCard() {
     })
 
     clearNewTripDraft()
-    setDraft({
-      destination: "",
-      dateMode: "exact",
-      travelers: "solo",
-    })
+    setDraft({ destination: "", dateMode: "exact", travelers: "solo" })
     toast.success("Trip created.")
     router.push(`/trips/${trip.id}`)
   }
@@ -88,51 +84,51 @@ export function NewTripCard() {
     <section className="rounded-sm border bg-card p-5 sm:p-6">
       <h1 className="text-2xl font-semibold tracking-tight">Where to?</h1>
 
-      <div className="mt-4">
+      <div className="mt-4 space-y-3">
         <DestinationSearch
-          placeholder="Search a destination…"
+          placeholder="Search destination…"
           value={hydrated ? draft.destination : undefined}
           onChange={(value) => update({ destination: value })}
         />
-      </div>
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        {DATE_MODES.map(({ value, icon: Icon, label }) => (
-          <Button
-            key={value}
-            variant="outline"
-            size="sm"
-            className={cn(
-              "gap-1.5",
-              draft.dateMode === value && "border-primary bg-primary/10"
-            )}
-            onClick={() => update({ dateMode: value })}
-          >
-            <Icon className="size-3.5" />
-            {label}
-          </Button>
-        ))}
+        <div className="flex flex-wrap gap-2">
+          {DATE_MODES.map(({ value, label, icon: Icon }) => (
+            <Button
+              key={value}
+              variant="outline"
+              size="sm"
+              className={cn(
+                "gap-1.5",
+                draft.dateMode === value && "border-primary bg-primary/10"
+              )}
+              onClick={() => update({ dateMode: value })}
+            >
+              <Icon className="size-3.5" />
+              {label}
+            </Button>
+          ))}
 
-        <div className="mx-1 h-4 w-px bg-border" />
+          <div className="mx-1 border-l" />
 
-        {TRAVELER_MODES.map(({ value, icon: Icon, label }) => (
-          <Button
-            key={value}
-            variant="outline"
-            size="sm"
-            className={cn(
-              "gap-1.5",
-              draft.travelers === value && "border-primary bg-primary/10"
-            )}
-            onClick={() => update({ travelers: value })}
-          >
-            <Icon className="size-3.5" />
-            {label}
-          </Button>
-        ))}
+          {TRAVELER_MODES.map(({ value, label, icon: Icon }) => (
+            <Button
+              key={value}
+              variant="outline"
+              size="sm"
+              className={cn(
+                "gap-1.5",
+                draft.travelers === value && "border-primary bg-primary/10"
+              )}
+              onClick={() => update({ travelers: value })}
+            >
+              <Icon className="size-3.5" />
+              {label}
+            </Button>
+          ))}
+        </div>
 
-        <Button className="ml-auto" onClick={handleCreateTrip}>
-          Plan Trip
+        <Button className="w-full sm:w-auto" onClick={handleCreateTrip}>
+          Create Trip
         </Button>
       </div>
     </section>

@@ -7,6 +7,9 @@ export type CreateTripPayload = {
   startDate: string
   endDate: string
   timezone?: string
+  travelers: number
+  isGroupTrip: boolean
+  totalDays: number
 }
 
 type TripRow = {
@@ -15,6 +18,9 @@ type TripRow = {
   start_date: string
   end_date: string
   timezone: string | null
+  travelers?: number | null
+  is_group_trip?: boolean | null
+  total_days?: number | null
   created_at?: string
   updated_at?: string
 }
@@ -29,6 +35,8 @@ function totalDaysFromRange(startDate: string, endDate: string): number {
 function tripFromRow(row: TripRow): Trip {
   const start = row.start_date
   const end = row.end_date
+  // Always derive totalDays from date range so existing rows created before
+  // this column existed don't show up with the default (e.g. total_days=1).
   const totalDays = totalDaysFromRange(start, end)
   const lastUpdated = row.updated_at ? row.updated_at.slice(0, 10) : new Date().toISOString().slice(0, 10)
   return {
@@ -37,8 +45,8 @@ function tripFromRow(row: TripRow): Trip {
     timezone: row.timezone ?? undefined,
     startDate: start,
     endDate: end,
-    travelers: 1,
-    isGroupTrip: false,
+    travelers: row.travelers ?? 1,
+    isGroupTrip: row.is_group_trip ?? false,
     status: "planning",
     lastUpdated,
     progress: 0,
@@ -70,7 +78,9 @@ export async function getTripsFromSupabase(): Promise<Trip[]> {
 
   const { data: rows, error } = await supabase
     .from("trips")
-    .select("id, destination, start_date, end_date, timezone, created_at, updated_at")
+    .select(
+      "id, destination, start_date, end_date, timezone, travelers, is_group_trip, total_days, created_at, updated_at"
+    )
     .order("updated_at", { ascending: false })
   if (error) return []
   if (!rows?.length) return []
@@ -96,6 +106,9 @@ export async function createTripInSupabase(payload: CreateTripPayload): Promise<
     start_date: payload.startDate,
     end_date: payload.endDate,
     timezone: payload.timezone ?? "UTC",
+    travelers: payload.travelers,
+    is_group_trip: payload.isGroupTrip,
+    total_days: payload.totalDays,
   })
   if (tripError) throw new Error(tripError.message)
 
@@ -112,10 +125,13 @@ export type UpdateTripPayload = {
   startDate?: string
   endDate?: string
   timezone?: string
+  travelers?: number
+  isGroupTrip?: boolean
+  totalDays?: number
 }
 
 /**
- * Update a trip in Supabase. Only destination, startDate, endDate, timezone are persisted.
+ * Update a trip in Supabase. Only Overview fields are persisted.
  */
 export async function updateTripInSupabase(tripId: string, payload: UpdateTripPayload): Promise<void> {
   const supabase = createClient()
@@ -124,6 +140,9 @@ export async function updateTripInSupabase(tripId: string, payload: UpdateTripPa
   if (payload.startDate != null) updates.start_date = payload.startDate
   if (payload.endDate != null) updates.end_date = payload.endDate
   if (payload.timezone != null) updates.timezone = payload.timezone
+  if (payload.travelers != null) updates.travelers = payload.travelers
+  if (payload.isGroupTrip != null) updates.is_group_trip = payload.isGroupTrip
+  if (payload.totalDays != null) updates.total_days = payload.totalDays
   if (Object.keys(updates).length <= 1) return
 
   const { error } = await supabase.from("trips").update(updates).eq("id", tripId)

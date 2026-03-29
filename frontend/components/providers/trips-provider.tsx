@@ -151,6 +151,9 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
       startDate: next.startDate,
       endDate: next.endDate,
       timezone: next.timezone ?? "UTC",
+      travelers: next.travelers,
+      isGroupTrip: next.isGroupTrip,
+      totalDays: next.totalDays,
     }).catch((e) => {
       toast.error(
         "Trip saved locally but could not sync to cloud.",
@@ -165,7 +168,10 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
       "destination" in partial ||
       "startDate" in partial ||
       "endDate" in partial ||
-      "timezone" in partial
+      "timezone" in partial ||
+      "travelers" in partial ||
+      "isGroupTrip" in partial ||
+      "totalDays" in partial
     setTrips((prev) =>
       prev.map((t) => {
         if (t.id !== id) return t
@@ -188,6 +194,9 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
             startDate: next.startDate,
             endDate: next.endDate,
             timezone: next.timezone ?? undefined,
+            travelers: next.travelers,
+            isGroupTrip: next.isGroupTrip,
+            totalDays: next.totalDays,
           }).catch((e) => {
             toast.error("Could not update trip in cloud.", {
               description: e instanceof Error ? e.message : undefined,

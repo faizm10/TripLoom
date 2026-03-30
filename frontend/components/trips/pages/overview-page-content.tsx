@@ -34,9 +34,15 @@ const progressSteps = [
   "Ready",
 ]
 
-export function OverviewPageContent({ trip: tripProp }: { trip: Trip }) {
-  const fromContext = useTripPage()
-  const trip = fromContext ?? tripProp
+export function OverviewPageContent() {
+  const trip = useTripPage()
+  if (!trip) {
+    return <p className="text-sm text-muted-foreground">Loading trip…</p>
+  }
+  return <OverviewPageBody trip={trip} />
+}
+
+function OverviewPageBody({ trip }: { trip: Trip }) {
   const updateTrip = useUpdateTrip()
   const nextStep = getNextStep(trip)
   const missing = getMissingChecklist(trip)
@@ -217,13 +223,13 @@ export function OverviewPageContent({ trip: tripProp }: { trip: Trip }) {
         <Card>
           <CardHeader><CardTitle>Flights</CardTitle></CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            {trip.selectedFlights ? trip.flightSummary || "Selected" : "Not selected"}
+            {trip.selectedFlights ? trip.flightSummary || "Logged" : "No flights logged"}
           </CardContent>
         </Card>
         <Card>
-          <CardHeader><CardTitle>Hotel</CardTitle></CardHeader>
+          <CardHeader><CardTitle>Stay</CardTitle></CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            {trip.selectedHotel ? trip.hotelSummary || trip.hotelArea || "Selected" : "Not selected"}
+            {trip.selectedHotel ? trip.hotelSummary || trip.hotelArea || "Logged" : "No stays logged"}
           </CardContent>
         </Card>
         <Card>

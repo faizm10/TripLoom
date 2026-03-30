@@ -1,8 +1,15 @@
 import { createClient } from "@/lib/supabase/client"
 
+export type FlightLegType = "outbound" | "inbound" | "one_way" | "internal" | "other"
+
+export type FlightStopDetail = {
+  airport: string
+  layover: string
+}
+
 export type SavedFlightRow = {
   id: string
-  source: string
+  source: FlightLegType
   route: string
   date: string
   departure: string
@@ -10,8 +17,10 @@ export type SavedFlightRow = {
   duration: string
   stops: string
   airline: string
+  flightNumber: string
   cost: string
-  bookUrl: string | null
+  notes: string
+  stopDetails: FlightStopDetail[]
 }
 
 type TripFlightRow = {
@@ -25,15 +34,29 @@ type TripFlightRow = {
   duration: string
   stops: string
   airline: string
+  flight_number?: string | null
   cost: string
-  offer_id: string | null
-  book_url: string | null
+  notes?: string | null
+  stop_details?: FlightStopDetail[] | null
+}
+
+function normalizeLegType(value: string): FlightLegType {
+  if (
+    value === "outbound" ||
+    value === "inbound" ||
+    value === "one_way" ||
+    value === "internal" ||
+    value === "other"
+  ) {
+    return value
+  }
+  return "other"
 }
 
 function rowToSaved(row: TripFlightRow): SavedFlightRow {
   return {
     id: row.id,
-    source: row.source,
+    source: normalizeLegType(row.source),
     route: row.route ?? "",
     date: row.flight_date ?? "",
     departure: row.departure ?? "",
@@ -41,14 +64,18 @@ function rowToSaved(row: TripFlightRow): SavedFlightRow {
     duration: row.duration ?? "",
     stops: row.stops ?? "",
     airline: row.airline ?? "",
+    flightNumber: row.flight_number ?? "",
     cost: row.cost ?? "",
-    bookUrl: row.book_url ?? null,
+    notes: row.notes ?? "",
+    stopDetails: Array.isArray(row.stop_details)
+      ? row.stop_details.map((item) => ({
+          airport: typeof item?.airport === "string" ? item.airport : "",
+          layover: typeof item?.layover === "string" ? item.layover : "",
+        }))
+      : [],
   }
 }
 
-/**
- * Load saved flights for a trip from the DB. Returns [] if not signed in or on error.
- */
 export async function getTripFlightsFromSupabase(tripId: string): Promise<SavedFlightRow[]> {
   const supabase = createClient()
   const {
@@ -59,7 +86,7 @@ export async function getTripFlightsFromSupabase(tripId: string): Promise<SavedF
 
   const { data: rows, error } = await supabase
     .from("trip_flights")
-    .select("id, trip_id, source, route, flight_date, departure, arrival, duration, stops, airline, cost, offer_id, book_url")
+    .select("*")
     .eq("trip_id", tripId)
     .order("created_at", { ascending: false })
   if (error) return []
@@ -69,7 +96,7 @@ export async function getTripFlightsFromSupabase(tripId: string): Promise<SavedF
 
 export type SaveTripFlightPayload = {
   id: string
-  source: string
+  source: FlightLegType
   route: string
   date: string
   departure: string
@@ -77,14 +104,12 @@ export type SaveTripFlightPayload = {
   duration: string
   stops: string
   airline: string
+  flightNumber: string
   cost: string
-  offerId?: string
-  bookUrl?: string
+  notes: string
+  stopDetails: FlightStopDetail[]
 }
 
-/**
- * Save a flight choice to the DB. Upserts by id (same id = replace).
- */
 export async function saveTripFlightToSupabase(
   tripId: string,
   payload: SaveTripFlightPayload
@@ -109,9 +134,10 @@ export async function saveTripFlightToSupabase(
       duration: payload.duration,
       stops: payload.stops,
       airline: payload.airline,
+      flight_number: payload.flightNumber,
       cost: payload.cost,
-      offer_id: payload.offerId ?? null,
-      book_url: payload.bookUrl ?? null,
+      notes: payload.notes,
+      stop_details: payload.stopDetails,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "id" }
@@ -119,18 +145,27 @@ export async function saveTripFlightToSupabase(
   if (error) throw new Error(error.message)
 }
 
-/**
- * Update a saved flight in the DB (e.g. change date). Only provided fields are updated.
- */
 export async function updateTripFlightInSupabase(
   tripId: string,
   id: string,
-  payload: { date?: string }
+  payload: Partial<Omit<SaveTripFlightPayload, "id">>
 ): Promise<void> {
   const supabase = createClient()
   const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (payload.source != null) updates.source = payload.source
+  if (payload.route != null) updates.route = payload.route
   if (payload.date != null) updates.flight_date = payload.date
+  if (payload.departure != null) updates.departure = payload.departure
+  if (payload.arrival != null) updates.arrival = payload.arrival
+  if (payload.duration != null) updates.duration = payload.duration
+  if (payload.stops != null) updates.stops = payload.stops
+  if (payload.airline != null) updates.airline = payload.airline
+  if (payload.flightNumber != null) updates.flight_number = payload.flightNumber
+  if (payload.cost != null) updates.cost = payload.cost
+  if (payload.notes != null) updates.notes = payload.notes
+  if (payload.stopDetails != null) updates.stop_details = payload.stopDetails
   if (Object.keys(updates).length <= 1) return
+
   const { error } = await supabase
     .from("trip_flights")
     .update(updates)
@@ -139,9 +174,6 @@ export async function updateTripFlightInSupabase(
   if (error) throw new Error(error.message)
 }
 
-/**
- * Remove a saved flight from the DB.
- */
 export async function deleteTripFlightFromSupabase(tripId: string, id: string): Promise<void> {
   const supabase = createClient()
   const { error } = await supabase

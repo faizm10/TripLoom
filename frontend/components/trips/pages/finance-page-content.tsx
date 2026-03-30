@@ -150,9 +150,15 @@ function addUtcDays(date: string, days: number): string {
   return base.toISOString().slice(0, 10)
 }
 
-export function FinancePageContent({ trip: tripProp }: { trip: Trip }) {
-  const fromContext = useTripPage()
-  const trip = fromContext ?? tripProp
+export function FinancePageContent() {
+  const trip = useTripPage()
+  if (!trip) {
+    return <p className="text-sm text-muted-foreground">Loading trip…</p>
+  }
+  return <FinancePageBody trip={trip} />
+}
+
+function FinancePageBody({ trip }: { trip: Trip }) {
   const finance = getTripFinance(trip)
   const summary = getFinanceSummary(trip)
   const guardrail = runFinanceGuardrails(trip)

@@ -1,8 +1,14 @@
+"use client"
+
+import { useTripPage } from "@/components/trips/trip-shell"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import type { Trip } from "@/lib/trips"
 
-export function GroupPageContent({ trip }: { trip: Trip }) {
+export function GroupPageContent() {
+  const trip = useTripPage()
+  if (!trip) {
+    return <p className="text-sm text-muted-foreground">Loading trip…</p>
+  }
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       <Card>
@@ -20,7 +26,7 @@ export function GroupPageContent({ trip }: { trip: Trip }) {
       <Card>
         <CardHeader><CardTitle>Split Rules</CardTitle></CardHeader>
         <CardContent className="text-sm text-muted-foreground">
-          Configure equal/custom splits for each booking.
+          Configure equal/custom splits for each shared trip expense.
         </CardContent>
       </Card>
     </div>

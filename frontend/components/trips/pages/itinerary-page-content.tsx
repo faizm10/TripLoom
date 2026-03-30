@@ -223,12 +223,18 @@ function normalizeForCompare(items: TripItineraryItem[]): string {
   )
 }
 
-export function ItineraryPageContent({ trip: tripProp }: { trip: Trip }) {
+export function ItineraryPageContent() {
+  const trip = useTripPage()
+  if (!trip) {
+    return <p className="text-sm text-muted-foreground">Loading trip…</p>
+  }
+  return <ItineraryPageBody trip={trip} />
+}
+
+function ItineraryPageBody({ trip }: { trip: Trip }) {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const fromContext = useTripPage()
-  const trip = fromContext ?? tripProp
   const timezone = getTripTimezone(trip)
   const { setTripItineraryItems } = useTripItineraryActions()
 

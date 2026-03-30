@@ -43,11 +43,11 @@ const pageCopy: Record<string, { title: string; subtitle: string }> = {
   },
   flights: {
     title: "Flights",
-    subtitle: "Search, compare, and confirm flight options with clear tradeoffs.",
+    subtitle: "Log your flight details in one place with a compact manual workspace.",
   },
   hotels: {
     title: "Hotels",
-    subtitle: "Find the right area and room, then book with confidence.",
+    subtitle: "Track your stays, dates, and notes without leaving the trip workspace.",
   },
   itinerary: {
     title: "Itinerary",

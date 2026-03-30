@@ -13,6 +13,8 @@ import {
   createTripInSupabase,
   deleteTripInSupabase,
   getTripsFromSupabase,
+  tripOverviewPatchToPayload,
+  type UpdateTripPayload,
   updateTripInSupabase,
 } from "@/lib/supabase-trips"
 import { createClient } from "@/lib/supabase/client"
@@ -36,12 +38,29 @@ function normalizeTransit(trip: Trip): Trip {
   }
 }
 
+function applyTripPatch(trip: Trip, partial: Partial<Trip>): Trip {
+  const merged: Trip = {
+    ...trip,
+    ...partial,
+    lastUpdated: new Date().toISOString().slice(0, 10),
+  }
+  if (typeof partial.totalDays === "number" && Array.isArray(trip.itineraryItems)) {
+    merged.itineraryItems = coerceItinerary({
+      ...merged,
+      itineraryItems: trip.itineraryItems,
+    })
+    merged.itineraryDaysPlanned = computeDaysPlanned(merged.itineraryItems)
+  }
+  return normalizeTransit(merged)
+}
+
 type TripsContextValue = {
   trips: Trip[]
   getTripById: (id: string) => Trip | undefined
   createTrip: (input: CreateTripInput) => Trip
   deleteTrip: (id: string) => void
   updateTrip: (id: string, partial: Partial<Trip>) => void
+  ensureTripInStore: (trip: Trip) => void
   setTripItineraryItems: (id: string, items: TripItineraryItem[]) => void
   addTripItineraryItem: (id: string, item: TripItineraryItem) => void
   updateTripItineraryItem: (
@@ -72,12 +91,22 @@ const TripsContext = React.createContext<TripsContextValue | null>(null)
 export function TripsProvider({ children }: { children: React.ReactNode }) {
   const [trips, setTrips] = React.useState<Trip[]>([])
   const [tripsLoaded, setTripsLoaded] = React.useState(false)
+  const fetchGenerationRef = React.useRef(0)
 
   const fetchTrips = React.useCallback(() => {
+    const gen = ++fetchGenerationRef.current
     getTripsFromSupabase()
-      .then((list) => setTrips(list.map(normalizeTransit)))
-      .catch(() => setTrips([]))
-      .finally(() => setTripsLoaded(true))
+      .then((list) => {
+        if (gen !== fetchGenerationRef.current) return
+        setTrips(list.map(normalizeTransit))
+      })
+      .catch(() => {
+        if (gen !== fetchGenerationRef.current) return
+        toast.error("Could not load trips from cloud.")
+      })
+      .finally(() => {
+        if (gen === fetchGenerationRef.current) setTripsLoaded(true)
+      })
   }, [])
 
   React.useEffect(() => {
@@ -163,33 +192,55 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
     return next
   }, [])
 
-  const updateTrip = React.useCallback((id: string, partial: Partial<Trip>) => {
-    const shouldPersistToDb =
-      "destination" in partial ||
-      "startDate" in partial ||
-      "endDate" in partial ||
-      "timezone" in partial ||
-      "travelers" in partial ||
-      "isGroupTrip" in partial ||
-      "totalDays" in partial
-    setTrips((prev) =>
-      prev.map((t) => {
-        if (t.id !== id) return t
-        const merged: Trip = {
-          ...t,
-          ...partial,
-          lastUpdated: new Date().toISOString().slice(0, 10),
+  const ensureTripInStore = React.useCallback((trip: Trip) => {
+    setTrips((prev) => {
+      if (prev.some((t) => t.id === trip.id)) return prev
+      return [normalizeTransit(trip), ...prev]
+    })
+  }, [])
+
+  const updateTrip = React.useCallback(
+    (id: string, partial: Partial<Trip>) => {
+      const shouldPersistToDb =
+        "destination" in partial ||
+        "startDate" in partial ||
+        "endDate" in partial ||
+        "timezone" in partial ||
+        "travelers" in partial ||
+        "isGroupTrip" in partial ||
+        "totalDays" in partial
+
+      const persistOverview = (payload: UpdateTripPayload) => {
+        if (Object.keys(payload).length === 0) return
+        queueMicrotask(() => {
+          void updateTripInSupabase(id, payload)
+            .then(() => {
+              fetchTrips()
+            })
+            .catch((e) => {
+              toast.error("Could not update trip in cloud.", {
+                description: e instanceof Error ? e.message : undefined,
+              })
+            })
+        })
+      }
+
+      setTrips((prev) => {
+        const idx = prev.findIndex((t) => t.id === id)
+        if (idx === -1) {
+          if (shouldPersistToDb) {
+            const payload = tripOverviewPatchToPayload(partial)
+            persistOverview(payload)
+          }
+          // Trip shell already has SSR `serverTrip` from Supabase; list syncs on fetchTrips
+          // after persist. No placeholder rows.
+          return prev
         }
-        if (typeof partial.totalDays === "number" && Array.isArray(t.itineraryItems)) {
-          merged.itineraryItems = coerceItinerary({
-            ...merged,
-            itineraryItems: t.itineraryItems,
-          })
-          merged.itineraryDaysPlanned = computeDaysPlanned(merged.itineraryItems)
-        }
-        const next = normalizeTransit(merged)
+
+        const next = applyTripPatch(prev[idx], partial)
+
         if (shouldPersistToDb) {
-          updateTripInSupabase(id, {
+          persistOverview({
             destination: next.destination,
             startDate: next.startDate,
             endDate: next.endDate,
@@ -197,16 +248,14 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
             travelers: next.travelers,
             isGroupTrip: next.isGroupTrip,
             totalDays: next.totalDays,
-          }).catch((e) => {
-            toast.error("Could not update trip in cloud.", {
-              description: e instanceof Error ? e.message : undefined,
-            })
           })
         }
-        return next
+
+        return prev.map((t, i) => (i === idx ? next : t))
       })
-    )
-  }, [])
+    },
+    [fetchTrips]
+  )
 
   const setTripItineraryItems = React.useCallback((id: string, items: TripItineraryItem[]) => {
     setTrips((prev) =>
@@ -471,6 +520,7 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
       createTrip,
       deleteTrip,
       updateTrip,
+      ensureTripInStore,
       setTripItineraryItems,
       addTripItineraryItem,
       updateTripItineraryItem,
@@ -489,6 +539,7 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
       createTrip,
       deleteTrip,
       updateTrip,
+      ensureTripInStore,
       setTripItineraryItems,
       addTripItineraryItem,
       updateTripItineraryItem,
@@ -559,6 +610,11 @@ export function useTrip(
 export function useUpdateTrip(): (id: string, partial: Partial<Trip>) => void {
   const ctx = React.useContext(TripsContext)
   return ctx?.updateTrip ?? (() => {})
+}
+
+export function useEnsureTripInStore(): (trip: Trip) => void {
+  const ctx = React.useContext(TripsContext)
+  return ctx?.ensureTripInStore ?? (() => {})
 }
 
 export function useTripItineraryActions(): {

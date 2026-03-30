@@ -26,13 +26,13 @@ export function DashboardMainSection({
                 <p className="text-foreground text-xs font-medium uppercase">
                   Next action
                 </p>
-                <p className="mt-1">Continue setup and review recommendations.</p>
+                <p className="mt-1">Keep adding the core trip details that make the workspace useful.</p>
               </div>
               <div className="border p-3">
                 <p className="text-foreground text-xs font-medium uppercase">
                   System note
                 </p>
-                <p className="mt-1">No authentication enabled for this dashboard build.</p>
+                <p className="mt-1">This dashboard build is focused on trip structure and visual flow.</p>
               </div>
             </div>
           </CardContent>
@@ -48,8 +48,8 @@ export function DashboardMainSection({
               <span className="font-medium">6</span>
             </div>
             <div className="flex items-center justify-between border p-2">
-              <span className="text-muted-foreground">Bookings</span>
-              <span className="font-medium">2 pending</span>
+              <span className="text-muted-foreground">Trip details</span>
+              <span className="font-medium">2 to add</span>
             </div>
             <div className="flex items-center justify-between border p-2">
               <span className="text-muted-foreground">Budget status</span>
@@ -67,10 +67,10 @@ export function DashboardMainSection({
               <SparklesIcon /> Plan My Day
             </Button>
             <Button variant="outline" className="justify-start rounded-none">
-              <PlaneIcon /> Search Flights
+              <PlaneIcon /> Add Flight
             </Button>
             <Button variant="outline" className="justify-start rounded-none">
-              <HotelIcon /> Find Hotels
+              <HotelIcon /> Add Stay
             </Button>
             <Button variant="outline" className="justify-start rounded-none">
               <CompassIcon /> Explore Nearby

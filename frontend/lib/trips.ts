@@ -1303,27 +1303,26 @@ export function getNextStep(trip: Trip): {
 } {
   if (!trip.selectedFlights) {
     return {
-      title: "Pick your flights",
-      description: "Compare top offer combinations and lock your best route.",
+      title: "Add your flights",
+      description: "Log the flights you plan to take so the trip details stay complete.",
       href: `/trips/${trip.id}/flights`,
-      cta: "Choose Flights",
+      cta: "Add Flights",
       recommendations: [
-        "Best pick: 1 stop, good baggage, balanced duration",
-        "Cheapest pick: save $120 with longer layover",
-        "Fastest pick: non-stop, slightly higher fare",
+        "Start with your main outbound or one-way leg",
+        "Add flight numbers, times, and notes while details are fresh",
       ],
     }
   }
 
   if (!trip.selectedHotel) {
     return {
-      title: "Choose your hotel",
-      description: "Select a stay close to saved places and transit nodes.",
+      title: "Add your stay",
+      description: "Save where you are staying so the rest of the trip can stay organized.",
       href: `/trips/${trip.id}/hotels`,
-      cta: "Choose Hotel",
+      cta: "Add Stay",
       recommendations: [
-        "Best area for first timers near city center",
-        "Filter by cancellation policy and guest rating",
+        "Add the main property first, then any extra stays",
+        "Include area, dates, and notes for easy reference later",
       ],
     }
   }
@@ -1357,12 +1356,12 @@ export function getNextStep(trip: Trip): {
   if (trip.isGroupTrip && trip.approvalsPending > 0) {
     return {
       title: "Resolve pending approvals",
-      description: "Your group has votes waiting before bookings are finalized.",
+      description: "Your group has votes waiting before shared trip details are finalized.",
       href: `/trips/${trip.id}/group`,
       cta: "Review Approvals",
       recommendations: [
-        "1 flight vote and 1 hotel vote are pending",
-        "Finalize to avoid price movement",
+        "Review the latest flight and stay choices together",
+        "Clear approvals so the plan stays aligned",
       ],
     }
   }
@@ -1394,8 +1393,8 @@ export function getNextStep(trip: Trip): {
 
 export function getMissingChecklist(trip: Trip): string[] {
   const missing: string[] = []
-  if (!trip.selectedFlights) missing.push("Flights not selected")
-  if (!trip.selectedHotel) missing.push("Hotel not selected")
+  if (!trip.selectedFlights) missing.push("Flights not added")
+  if (!trip.selectedHotel) missing.push("Stay not added")
   if (getTripItineraryDaysPlanned(trip) === 0) missing.push("Itinerary not started")
   if (!hasTransitRoutes(trip)) missing.push("Transit routes not saved")
   if (!isFinanceComplete(trip)) missing.push("Finance setup incomplete")

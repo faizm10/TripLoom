@@ -34,16 +34,16 @@ export function DashboardChatPanel({ chatOpen }: { chatOpen: boolean }) {
 
         <div className="flex-1 space-y-3 overflow-auto p-4 text-sm">
           <div className="bg-muted border p-3">
-            Try: <span className="font-medium">"Plan a low-cost day 2 route"</span>
+            Try: <span className="font-medium">&quot;Plan a low-cost day 2 route&quot;</span>
           </div>
           <div className="border p-3">
-            I can help optimize flights, hotels, transit paths, and nearby attractions.
+            I can help organize flights, stays, transit paths, and nearby attractions.
           </div>
           <div className="bg-primary text-primary-foreground ml-auto max-w-[90%] border p-3">
             What should I prioritize for first-time travelers?
           </div>
           <div className="border p-3">
-            Start with visa and documents, then lock flights/hotel, then build transit-safe daily plans.
+            Start with documents, then log flights and stays, then build transit-safe daily plans.
           </div>
         </div>
 

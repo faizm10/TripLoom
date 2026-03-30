@@ -324,9 +324,15 @@ function buildStaticMapUrl(preview: MapPreview | null): string | null {
   return `https://maps.googleapis.com/maps/api/staticmap?${params.toString()}`
 }
 
-export function TransitPageContent({ trip: tripProp }: { trip: Trip }) {
-  const fromContext = useTripPage()
-  const trip = fromContext ?? tripProp
+export function TransitPageContent() {
+  const trip = useTripPage()
+  if (!trip) {
+    return <p className="text-sm text-muted-foreground">Loading trip…</p>
+  }
+  return <TransitPageBody trip={trip} />
+}
+
+function TransitPageBody({ trip }: { trip: Trip }) {
   const updateTrip = useUpdateTrip()
 
   const routes = React.useMemo(() => sortRoutes(getTripTransitRoutes(trip)), [trip])

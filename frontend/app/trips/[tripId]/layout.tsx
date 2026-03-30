@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation"
 
 import { TripLayoutClient } from "@/components/trips/trip-layout-client"
-import { getTripById } from "@/lib/trips"
+import { getTripByIdFromSupabase } from "@/lib/supabase-trips-server"
 
 export default async function TripLayout({
   children,
@@ -11,7 +11,7 @@ export default async function TripLayout({
   params: Promise<{ tripId: string }>
 }>) {
   const { tripId } = await params
-  const trip = getTripById(tripId)
+  const trip = await getTripByIdFromSupabase(tripId)
 
   if (!trip) notFound()
 

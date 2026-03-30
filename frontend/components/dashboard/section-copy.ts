@@ -4,17 +4,17 @@ export const sectionCopy: SectionCopy = {
   onboarding: {
     title: "Get Trip-Ready",
     subtitle:
-      "Complete traveler profile, preferences, and destination details before you start booking.",
+      "Complete traveler profile, preferences, and destination details before you start logging plans.",
   },
   flights: {
     title: "Flight Workspace",
     subtitle:
-      "Compare one-way, round-trip, and multi-city offers with quick filters and shortlists.",
+      "Capture flight details manually with just the fields you need to keep the trip organized.",
   },
   hotels: {
     title: "Hotel Workspace",
     subtitle:
-      "Review availability, amenities, policy details, and add selected stays to itinerary.",
+      "Save hotel stays, dates, and location notes without a bulky booking flow.",
   },
   transit: {
     title: "Transit Planner",

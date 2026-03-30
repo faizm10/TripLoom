@@ -151,6 +151,8 @@ export type Trip = {
   hotelArea?: string
   flightSummary?: string
   hotelSummary?: string
+  /** Sum of night counts from saved hotel stays (client-synced). */
+  hotelNightsBooked?: number
   activities: string[]
 }
 
@@ -183,563 +185,7 @@ const TIME_BLOCK_ORDER: Record<ItineraryTimeBlock, number> = {
   evening: 3,
 }
 
-const trips: Trip[] = [
-  {
-    id: "germany-spring",
-    destination: "Germany",
-    timezone: "Europe/Berlin",
-    startDate: "2026-04-24",
-    endDate: "2026-05-04",
-    travelers: 1,
-    isGroupTrip: false,
-    status: "planning",
-    lastUpdated: "2026-02-14",
-    progress: 36,
-    selectedFlights: false,
-    selectedHotel: false,
-    itineraryDaysPlanned: 11,
-    itineraryItems: [
-      {
-        id: "germany-itin-1",
-        tripId: "germany-spring",
-        dayIndex: 1,
-        timeBlock: "morning",
-        status: "planned",
-        category: "outbound_flight",
-        title: "Fly Out: Toronto → Berlin",
-        locationLabel: "YYZ to BER",
-        notes: "Arrive Berlin in the morning and check in.",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:00:00.000Z",
-        updatedAt: "2026-02-14T08:00:00.000Z",
-      },
-      {
-        id: "germany-itin-2",
-        tripId: "germany-spring",
-        dayIndex: 1,
-        timeBlock: "evening",
-        status: "planned",
-        category: "rest",
-        title: "Berlin Arrival Reset",
-        locationLabel: "Berlin",
-        notes: "Easy evening and overnight stay.",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:01:00.000Z",
-        updatedAt: "2026-02-14T08:01:00.000Z",
-      },
-      {
-        id: "germany-itin-3",
-        tripId: "germany-spring",
-        dayIndex: 2,
-        timeBlock: "morning",
-        status: "planned",
-        category: "sightseeing",
-        title: "Berlin Core Sights",
-        locationLabel: "Berlin",
-        notes: "Full day explore with optional soccer game at night.",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:02:00.000Z",
-        updatedAt: "2026-02-14T08:02:00.000Z",
-      },
-      {
-        id: "germany-itin-4",
-        tripId: "germany-spring",
-        dayIndex: 3,
-        timeBlock: "morning",
-        status: "planned",
-        category: "activities",
-        title: "Berlin Explore Day 2",
-        locationLabel: "Berlin",
-        notes: "Second full Berlin exploration day.",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:03:00.000Z",
-        updatedAt: "2026-02-14T08:03:00.000Z",
-      },
-      {
-        id: "germany-itin-5",
-        tripId: "germany-spring",
-        dayIndex: 4,
-        timeBlock: "morning",
-        status: "planned",
-        category: "commute",
-        title: "Train: Berlin → Dresden (IC 2173)",
-        locationLabel: "Berlin Hbf to Dresden-Neustadt",
-        commuteDetails:
-          "15 Euro • Journey on Mo. 27.04.2026 • Berlin Hbf 08:26 (IC 2173) → Dresden-Neustadt 10:21 Pl. 8 (IC 2173).",
-        locationLink: "https://int.bahn.de/en/buchung/start?vbid=aee9f479-8408-4643-bb27-7239b3ad8a57",
-        notes: "Journey on Mo. 27.04.2026 with IC 2173.",
-        startTimeLocal: "2026-04-27T08:26",
-        endTimeLocal: "2026-04-27T10:21",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:04:00.000Z",
-        updatedAt: "2026-02-14T08:04:00.000Z",
-      },
-      {
-        id: "germany-itin-6",
-        tripId: "germany-spring",
-        dayIndex: 4,
-        timeBlock: "afternoon",
-        status: "planned",
-        category: "sightseeing",
-        title: "Dresden Midday Walk",
-        locationLabel: "Dresden",
-        notes: "Half-day Dresden explore after arrival.",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:05:00.000Z",
-        updatedAt: "2026-02-14T08:05:00.000Z",
-      },
-      {
-        id: "germany-itin-7",
-        tripId: "germany-spring",
-        dayIndex: 4,
-        timeBlock: "evening",
-        status: "planned",
-        category: "food",
-        title: "Dresden Evening Explore",
-        locationLabel: "Dresden Old Town",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:06:00.000Z",
-        updatedAt: "2026-02-14T08:06:00.000Z",
-      },
-      {
-        id: "germany-itin-8",
-        tripId: "germany-spring",
-        dayIndex: 5,
-        timeBlock: "morning",
-        status: "planned",
-        category: "commute",
-        title: "Dresden → Bad Schandau",
-        locationLabel: "Saxon Switzerland",
-        commuteDetails: "Approx 30 min train each way.",
-        notes: "Dresden → Bad Schandau (~30 min).",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:07:00.000Z",
-        updatedAt: "2026-02-14T08:07:00.000Z",
-      },
-      {
-        id: "germany-itin-9",
-        tripId: "germany-spring",
-        dayIndex: 5,
-        timeBlock: "afternoon",
-        status: "planned",
-        category: "activities",
-        title: "Bastei Bridge or Königstein Fortress",
-        locationLabel: "Saxon Switzerland",
-        notes: "Choose one main activity.",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:08:00.000Z",
-        updatedAt: "2026-02-14T08:08:00.000Z",
-      },
-      {
-        id: "germany-itin-10",
-        tripId: "germany-spring",
-        dayIndex: 5,
-        timeBlock: "evening",
-        status: "planned",
-        category: "commute",
-        title: "Return to Dresden",
-        locationLabel: "Bad Schandau to Dresden",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:09:00.000Z",
-        updatedAt: "2026-02-14T08:09:00.000Z",
-      },
-      {
-        id: "germany-itin-11",
-        tripId: "germany-spring",
-        dayIndex: 6,
-        timeBlock: "morning",
-        status: "planned",
-        category: "commute",
-        title: "Day Trip: Dresden → Prague",
-        locationLabel: "Flixbus",
-        commuteDetails:
-          "FlixBus direct • Wed Apr 29 • Dresden central station (Bayrische Straße) 07:20 a.m. → Prague (Central Bus Station Florenc) 09:10 a.m.",
-        locationLink:
-          "https://shop.flixbus.ca/search?departureCity=40db219f-8646-11e6-9066-549f350fcb0c&arrivalCity=40de1ad1-8646-11e6-9066-549f350fcb0c&route=Dresden-Prague&rideDate=29.04.2026&backRideDate=29.04.2026&adult=2&_locale=en_CA&departureCountryCode=DE&arrivalCountryCode=CZ&backRide=1&features[feature.enable_distribusion]=1&features[feature.train_cities_only]=0&features[feature.station_search]=0&features[feature.station_search_recommendation]=0&features[feature.darken_page]=1&utm_source=google&utm_medium=sea-brand&utm_campaign=3799800904.22108745965_177093320550.728430739660_aud-2117685796929:kwd-46934810167_9000847__&utm_term=flixbus&utm_content=ca.flixbus&gad_source=1&gclid=Cj0KCQiAhaHMBhD2ARIsAPAU_D58mjDrlJDJvrOp2GjwrUcoDjlYVbp11ST67WjET-oAdC2ucuWOMDMaAncOEALw_wcB&atb_pdid=bc346e6e-1be5-4475-b230-0eca784d1d10&_sp=f9e6c53f-82e0-4ff9-acc2-3242cad532d9&_spnuid=b6e5ff34-bd85-4f65-a5da-1489ddb31f25_1770601891210",
-        notes: "Booking total incl. VAT: CA$81.95 (Outbound 2 adults: CA$37.98, Return 2 adults: CA$39.98, Service fee: CA$3.99).",
-        startTimeLocal: "2026-04-29T07:20",
-        endTimeLocal: "2026-04-29T09:10",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:10:00.000Z",
-        updatedAt: "2026-02-14T08:10:00.000Z",
-      },
-      {
-        id: "germany-itin-12",
-        tripId: "germany-spring",
-        dayIndex: 6,
-        timeBlock: "afternoon",
-        status: "planned",
-        category: "sightseeing",
-        title: "Prague Highlights",
-        locationLabel: "Prague",
-        notes: "3/4 day coverage target.",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:11:00.000Z",
-        updatedAt: "2026-02-14T08:11:00.000Z",
-      },
-      {
-        id: "germany-itin-13",
-        tripId: "germany-spring",
-        dayIndex: 6,
-        timeBlock: "evening",
-        status: "planned",
-        category: "commute",
-        title: "Prague → Dresden Return",
-        locationLabel: "Flixbus",
-        commuteDetails:
-          "FlixBus direct • Wed Apr 29 • Prague (Central Bus Station Florenc) 09:30 p.m. → Dresden central station (Bayrische Straße) 11:25 p.m.",
-        locationLink:
-          "https://shop.flixbus.ca/search?departureCity=40db219f-8646-11e6-9066-549f350fcb0c&arrivalCity=40de1ad1-8646-11e6-9066-549f350fcb0c&route=Dresden-Prague&rideDate=29.04.2026&backRideDate=29.04.2026&adult=2&_locale=en_CA&departureCountryCode=DE&arrivalCountryCode=CZ&backRide=1&features[feature.enable_distribusion]=1&features[feature.train_cities_only]=0&features[feature.station_search]=0&features[feature.station_search_recommendation]=0&features[feature.darken_page]=1&utm_source=google&utm_medium=sea-brand&utm_campaign=3799800904.22108745965_177093320550.728430739660_aud-2117685796929:kwd-46934810167_9000847__&utm_term=flixbus&utm_content=ca.flixbus&gad_source=1&gclid=Cj0KCQiAhaHMBhD2ARIsAPAU_D58mjDrlJDJvrOp2GjwrUcoDjlYVbp11ST67WjET-oAdC2ucuWOMDMaAncOEALw_wcB&atb_pdid=bc346e6e-1be5-4475-b230-0eca784d1d10&_sp=f9e6c53f-82e0-4ff9-acc2-3242cad532d9&_spnuid=b6e5ff34-bd85-4f65-a5da-1489ddb31f25_1770601891210",
-        notes: "Return leg for Prague day trip (same booking as outbound, CA$81.95 total incl. VAT).",
-        startTimeLocal: "2026-04-29T21:30",
-        endTimeLocal: "2026-04-29T23:25",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:12:00.000Z",
-        updatedAt: "2026-02-14T08:12:00.000Z",
-      },
-      {
-        id: "germany-itin-14",
-        tripId: "germany-spring",
-        dayIndex: 7,
-        timeBlock: "morning",
-        status: "planned",
-        category: "commute",
-        title: "Travel: Dresden → Munich",
-        locationLabel: "Rail via Leipzig or direct bus",
-        commuteDetails: "Bus direct: 6 hr 30 min • Train: transfer at Leipzig, then direct train.",
-        notes: "Evaluate bus vs train based on transfer risk.",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:13:00.000Z",
-        updatedAt: "2026-02-14T08:13:00.000Z",
-      },
-      {
-        id: "germany-itin-15",
-        tripId: "germany-spring",
-        dayIndex: 8,
-        timeBlock: "morning",
-        status: "planned",
-        category: "activities",
-        title: "Munich Explore Day",
-        locationLabel: "Munich",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:14:00.000Z",
-        updatedAt: "2026-02-14T08:14:00.000Z",
-      },
-      {
-        id: "germany-itin-16",
-        tripId: "germany-spring",
-        dayIndex: 9,
-        timeBlock: "morning",
-        status: "planned",
-        category: "commute",
-        title: "Rail: Munich → Salzburg (RJX 61)",
-        locationLabel: "München Hbf to Salzburg Hbf",
-        commuteDetails:
-          "18 Euro • Journey on Sa. 02.05.2026 • München Hbf 07:22 Pl. 11 (RJX 61) → Salzburg Hbf 08:58.",
-        locationLink: "https://int.bahn.de/en/buchung/start?vbid=1bea973b-d61a-41dd-a58d-ce8623a94ce7",
-        notes: "Morning outbound rail leg for Salzburg day trip.",
-        startTimeLocal: "2026-05-02T07:22",
-        endTimeLocal: "2026-05-02T08:58",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:15:00.000Z",
-        updatedAt: "2026-02-14T08:15:00.000Z",
-      },
-      {
-        id: "germany-itin-17",
-        tripId: "germany-spring",
-        dayIndex: 9,
-        timeBlock: "afternoon",
-        status: "planned",
-        category: "sightseeing",
-        title: "Salzburg Day Trip",
-        locationLabel: "Salzburg",
-        notes: "Approx 3/4 day in city center.",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:16:00.000Z",
-        updatedAt: "2026-02-14T08:16:00.000Z",
-      },
-      {
-        id: "germany-itin-18",
-        tripId: "germany-spring",
-        dayIndex: 9,
-        timeBlock: "evening",
-        status: "planned",
-        category: "commute",
-        title: "Rail: Salzburg → Munich (RJX 68)",
-        locationLabel: "Salzburg Hbf to München Hbf",
-        commuteDetails:
-          "13 Euro • Journey on Sa. 02.05.2026 • Salzburg Hbf 21:00 (RJX 68) → München Hbf Gl.5-10 22:32 Pl. 9.",
-        locationLink: "https://int.bahn.de/en/buchung/start?vbid=eaf41133-79c4-4afc-8f83-bd657f7e015f",
-        notes: "Evening return rail leg from Salzburg.",
-        startTimeLocal: "2026-05-02T21:00",
-        endTimeLocal: "2026-05-02T22:32",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:17:00.000Z",
-        updatedAt: "2026-02-14T08:17:00.000Z",
-      },
-      {
-        id: "germany-itin-19",
-        tripId: "germany-spring",
-        dayIndex: 10,
-        timeBlock: "morning",
-        status: "planned",
-        category: "commute",
-        title: "Travel: Munich → Frankfurt (ICE 726)",
-        locationLabel: "München Hbf to Frankfurt(Main)Hbf",
-        commuteDetails:
-          "28 Euro • Journey on So. 03.05.2026 • München Hbf 07:42 Pl. 22 (ICE 726) → Frankfurt(Main)Hbf 11:02 Pl. 7 (ICE 726).",
-        locationLink: "https://int.bahn.de/en/buchung/start?vbid=4aab571f-81e2-4174-bd4c-90eec38f5e9c",
-        notes: "ICE morning transfer to Frankfurt on Sunday.",
-        startTimeLocal: "2026-05-03T07:42",
-        endTimeLocal: "2026-05-03T11:02",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:18:00.000Z",
-        updatedAt: "2026-02-14T08:18:00.000Z",
-      },
-      {
-        id: "germany-itin-20",
-        tripId: "germany-spring",
-        dayIndex: 10,
-        timeBlock: "afternoon",
-        status: "planned",
-        category: "activities",
-        title: "Frankfurt Half-Day Explore",
-        locationLabel: "Frankfurt",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:19:00.000Z",
-        updatedAt: "2026-02-14T08:19:00.000Z",
-      },
-      {
-        id: "germany-itin-21",
-        tripId: "germany-spring",
-        dayIndex: 11,
-        timeBlock: "morning",
-        status: "planned",
-        category: "inbound_flight",
-        title: "Return Flight: Frankfurt → Toronto",
-        locationLabel: "FRA to YYZ",
-        notes: "Arrive Toronto around 2 PM.",
-        sortOrder: 10,
-        createdAt: "2026-02-14T08:20:00.000Z",
-        updatedAt: "2026-02-14T08:20:00.000Z",
-      },
-    ],
-    totalDays: 11,
-    transitSaved: false,
-    transitRoutes: [],
-    financeSet: false,
-    approvalsPending: 0,
-    budgetTotal: 0,
-    perPerson: 0,
-    activities: [
-      "Loaded Germany day-by-day itinerary structure",
-      "Added rail and bus commute blocks",
-      "Added hotel and logistics planning checkpoints",
-    ],
-  },
-  {
-    id: "tokyo-fall",
-    destination: "Tokyo, Japan",
-    timezone: "Asia/Tokyo",
-    startDate: "2026-10-03",
-    endDate: "2026-10-12",
-    travelers: 1,
-    isGroupTrip: false,
-    status: "booked",
-    lastUpdated: "2026-02-14",
-    progress: 78,
-    selectedFlights: true,
-    selectedHotel: true,
-    itineraryDaysPlanned: 8,
-    itineraryItems: [
-      {
-        id: "tokyo-itin-1",
-        tripId: "tokyo-fall",
-        dayIndex: 1,
-        timeBlock: "morning",
-        status: "planned",
-        category: "commute",
-        title: "Arrive and Check In",
-        locationLabel: "Shinjuku",
-        startTimeLocal: "2026-10-03T10:00",
-        endTimeLocal: "2026-10-03T12:00",
-        sortOrder: 10,
-        createdAt: "2026-02-14T09:20:00.000Z",
-        updatedAt: "2026-02-14T09:20:00.000Z",
-      },
-      {
-        id: "tokyo-itin-2",
-        tripId: "tokyo-fall",
-        dayIndex: 2,
-        timeBlock: "morning",
-        status: "todo",
-        category: "sightseeing",
-        title: "Senso-ji and Nakamise",
-        locationLabel: "Asakusa",
-        startTimeLocal: "2026-10-04T09:00",
-        endTimeLocal: "2026-10-04T12:00",
-        sortOrder: 10,
-        createdAt: "2026-02-14T09:21:00.000Z",
-        updatedAt: "2026-02-14T09:21:00.000Z",
-      },
-      {
-        id: "tokyo-itin-3",
-        tripId: "tokyo-fall",
-        dayIndex: 3,
-        timeBlock: "afternoon",
-        status: "planned",
-        category: "activities",
-        title: "Meiji Shrine + Yoyogi",
-        locationLabel: "Harajuku",
-        startTimeLocal: "2026-10-05T13:00",
-        endTimeLocal: "2026-10-05T16:00",
-        sortOrder: 10,
-        createdAt: "2026-02-14T09:22:00.000Z",
-        updatedAt: "2026-02-14T09:22:00.000Z",
-      },
-      {
-        id: "tokyo-itin-4",
-        tripId: "tokyo-fall",
-        dayIndex: 4,
-        timeBlock: "evening",
-        status: "todo",
-        category: "food",
-        title: "Shibuya Crossing + Dinner",
-        locationLabel: "Shibuya",
-        startTimeLocal: "2026-10-06T18:00",
-        endTimeLocal: "2026-10-06T21:00",
-        sortOrder: 10,
-        createdAt: "2026-02-14T09:23:00.000Z",
-        updatedAt: "2026-02-14T09:23:00.000Z",
-      },
-      {
-        id: "tokyo-itin-5",
-        tripId: "tokyo-fall",
-        dayIndex: 5,
-        timeBlock: "morning",
-        status: "planned",
-        category: "food",
-        title: "Tsukiji Outer Market",
-        locationLabel: "Chuo City",
-        startTimeLocal: "2026-10-07T08:30",
-        endTimeLocal: "2026-10-07T10:30",
-        sortOrder: 10,
-        createdAt: "2026-02-14T09:24:00.000Z",
-        updatedAt: "2026-02-14T09:24:00.000Z",
-      },
-      {
-        id: "tokyo-itin-6",
-        tripId: "tokyo-fall",
-        dayIndex: 6,
-        timeBlock: "afternoon",
-        status: "finished",
-        category: "activities",
-        title: "TeamLab Planets",
-        locationLabel: "Toyosu",
-        startTimeLocal: "2026-10-08T14:00",
-        endTimeLocal: "2026-10-08T16:00",
-        sortOrder: 10,
-        createdAt: "2026-02-14T09:25:00.000Z",
-        updatedAt: "2026-02-14T09:25:00.000Z",
-      },
-      {
-        id: "tokyo-itin-7",
-        tripId: "tokyo-fall",
-        dayIndex: 7,
-        timeBlock: "morning",
-        status: "planned",
-        category: "sightseeing",
-        title: "Ueno Park + Museums",
-        locationLabel: "Ueno",
-        startTimeLocal: "2026-10-09T09:30",
-        endTimeLocal: "2026-10-09T13:00",
-        sortOrder: 10,
-        createdAt: "2026-02-14T09:26:00.000Z",
-        updatedAt: "2026-02-14T09:26:00.000Z",
-      },
-      {
-        id: "tokyo-itin-8",
-        tripId: "tokyo-fall",
-        dayIndex: 8,
-        timeBlock: "evening",
-        status: "todo",
-        category: "games",
-        title: "Odaiba Night Walk",
-        locationLabel: "Odaiba",
-        startTimeLocal: "2026-10-10T18:30",
-        endTimeLocal: "2026-10-10T21:00",
-        sortOrder: 10,
-        createdAt: "2026-02-14T09:27:00.000Z",
-        updatedAt: "2026-02-14T09:27:00.000Z",
-      },
-    ],
-    totalDays: 9,
-    transitSaved: true,
-    transitRoutes: [
-      {
-        id: "tokyo-route-1",
-        tripId: "tokyo-fall",
-        dayIndex: 1,
-        fromLabel: "Shinjuku Station",
-        toLabel: "Senso-ji Temple",
-        mode: "rail",
-        durationMinutes: 34,
-        departureTimeLocal: "2026-10-03T08:30",
-        arrivalTimeLocal: "2026-10-03T09:04",
-        estimatedCost: 2.15,
-        currency: "USD",
-        provider: "manual",
-        transfers: 1,
-        walkingMinutes: 9,
-        notes: "Use Suica card",
-        createdAt: "2026-02-14T09:15:00.000Z",
-        updatedAt: "2026-02-14T09:15:00.000Z",
-      },
-    ],
-    financeSet: true,
-    approvalsPending: 0,
-    budgetTotal: 2940,
-    perPerson: 2940,
-    hotelArea: "Shinjuku",
-    flightSummary: "Round-trip, non-stop, 13h 15m",
-    hotelSummary: "4-star near transit hub",
-    activities: [
-      "Hotel confirmation uploaded",
-      "Transit routes saved for Days 1-3",
-      "FX alert: JPY improved by 1.2%",
-    ],
-  },
-  {
-    id: "lisbon-weekend",
-    destination: "Lisbon, Portugal",
-    timezone: "Europe/Lisbon",
-    startDate: "2026-06-05",
-    endDate: "2026-06-08",
-    travelers: 2,
-    isGroupTrip: true,
-    status: "in_progress",
-    lastUpdated: "2026-02-13",
-    progress: 64,
-    selectedFlights: true,
-    selectedHotel: true,
-    itineraryDaysPlanned: 1,
-    itineraryItems: [],
-    totalDays: 3,
-    transitSaved: false,
-    transitRoutes: [],
-    financeSet: false,
-    approvalsPending: 1,
-    budgetTotal: 1320,
-    perPerson: 660,
-    hotelArea: "Baixa",
-    flightSummary: "Round-trip, non-stop, 2h 40m",
-    hotelSummary: "Boutique stay in city center",
-    activities: [
-      "Added tram loop as Day 1 route",
-      "Approval requested for hotel room upgrade",
-    ],
-  },
-]
+const trips: Trip[] = []
 
 export function hasTransitRoutes(trip: Trip): boolean {
   if (Array.isArray(trip.transitRoutes)) return trip.transitRoutes.length > 0
@@ -862,6 +308,25 @@ export function getTripItineraryDaysPlanned(trip: Trip): number {
   const items = getTripItineraryItems(trip)
   if (items.length === 0) return Math.max(0, Math.floor(trip.itineraryDaysPlanned || 0))
   return computeItineraryDaysPlanned(items)
+}
+
+/** Days with at least one non–flight-synced itinerary item (for “build itinerary” prompts). */
+export function getManualItineraryDaysPlanned(trip: Trip): number {
+  const items = getTripItineraryItems(trip).filter((item) => !item.id.includes(":auto-flight:"))
+  return computeItineraryDaysPlanned(items)
+}
+
+/** Nights between trip start and end (last night is trip end date). */
+export function tripRequiredHotelNights(trip: Trip): number {
+  return Math.max(1, trip.totalDays - 1)
+}
+
+export function hasStayCoverage(trip: Trip): boolean {
+  const required = tripRequiredHotelNights(trip)
+  if (trip.hotelNightsBooked != null) {
+    return trip.hotelNightsBooked >= required
+  }
+  return trip.selectedHotel
 }
 
 export function validateItineraryItemDraft(
@@ -1001,7 +466,7 @@ export function createFallbackTrip(tripId: string): Trip {
 }
 
 export function getTripById(tripId: string): Trip | undefined {
-  return trips.find((trip) => trip.id === tripId) ?? createFallbackTrip(tripId)
+  return trips.find((trip) => trip.id === tripId)
 }
 
 export function getTripStatusLabel(status: TripStatus): string {
@@ -1314,20 +779,26 @@ export function getNextStep(trip: Trip): {
     }
   }
 
-  if (!trip.selectedHotel) {
+  if (!hasStayCoverage(trip)) {
+    const required = tripRequiredHotelNights(trip)
+    const booked = trip.hotelNightsBooked ?? 0
+    const shortBy = Math.max(0, required - booked)
     return {
-      title: "Add your stay",
-      description: "Save where you are staying so the rest of the trip can stay organized.",
+      title: trip.selectedHotel ? "Extend your stay coverage" : "Add your stay",
+      description:
+        trip.selectedHotel && shortBy > 0
+          ? `Bookings cover ${booked} night${booked === 1 ? "" : "s"}; this trip needs about ${required} night${required === 1 ? "" : "s"}.`
+          : "Save where you are staying so the rest of the trip can stay organized.",
       href: `/trips/${trip.id}/hotels`,
       cta: "Add Stay",
       recommendations: [
+        "Match check-in and check-out to your trip dates",
         "Add the main property first, then any extra stays",
-        "Include area, dates, and notes for easy reference later",
       ],
     }
   }
 
-  if (getTripItineraryDaysPlanned(trip) === 0) {
+  if (getManualItineraryDaysPlanned(trip) === 0) {
     return {
       title: "Auto-fill your itinerary",
       description: "Generate a day-by-day starter plan and refine it quickly.",
@@ -1394,8 +865,16 @@ export function getNextStep(trip: Trip): {
 export function getMissingChecklist(trip: Trip): string[] {
   const missing: string[] = []
   if (!trip.selectedFlights) missing.push("Flights not added")
-  if (!trip.selectedHotel) missing.push("Stay not added")
-  if (getTripItineraryDaysPlanned(trip) === 0) missing.push("Itinerary not started")
+  if (!hasStayCoverage(trip)) {
+    const required = tripRequiredHotelNights(trip)
+    const booked = trip.hotelNightsBooked ?? 0
+    if (trip.selectedHotel && booked < required) {
+      missing.push(`Stay: need ${required} nights, have ${booked}`)
+    } else {
+      missing.push("Stay not added")
+    }
+  }
+  if (getManualItineraryDaysPlanned(trip) === 0) missing.push("Itinerary not started")
   if (!hasTransitRoutes(trip)) missing.push("Transit routes not saved")
   if (!isFinanceComplete(trip)) missing.push("Finance setup incomplete")
   if (trip.isGroupTrip && trip.approvalsPending > 0) {

@@ -16,6 +16,7 @@ import {
   deleteTripHotelStayFromSupabase,
   getTripHotelStaysFromSupabase,
   saveTripHotelStayToSupabase,
+  sumHotelStayNights,
   type TripHotelStay,
 } from "@/lib/supabase-trip-hotels"
 import { summarizeHotels } from "@/lib/trip-manual-details"
@@ -62,6 +63,7 @@ function HotelsPageBody({ trip }: { trip: Trip }) {
         selectedHotel: nextStays.length > 0,
         hotelSummary: summarizeHotels(nextStays),
         hotelArea: nextStays[0]?.area || undefined,
+        hotelNightsBooked: sumHotelStayNights(nextStays),
       })
     },
     [trip.id, updateTrip]

@@ -11,6 +11,7 @@ import {
   FolderOpenIcon,
   DownloadIcon,
   Trash2Icon,
+  Loader2Icon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
@@ -21,62 +22,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Badge } from "@/components/ui/badge"
-
-// --- Mock Data ---
-
-type Category = "Flight" | "Hotel" | "ID/Visa" | "Activity" | "Other"
-
-interface Document {
-  id: string
-  name: string
-  category: Category
-  size: string
-  dateAdded: string
-  type: "pdf" | "image" | "doc"
-}
-
-const mockDocuments: Document[] = [
-  {
-    id: "doc1",
-    name: "Lufthansa_E-Ticket_Munich.pdf",
-    category: "Flight",
-    size: "1.2 MB",
-    dateAdded: "Oct 12, 2026",
-    type: "pdf",
-  },
-  {
-    id: "doc2",
-    name: "Grand_Hotel_Confirmation.pdf",
-    category: "Hotel",
-    size: "840 KB",
-    dateAdded: "Oct 15, 2026",
-    type: "pdf",
-  },
-  {
-    id: "doc3",
-    name: "Passport_Scan_Faiz.jpg",
-    category: "ID/Visa",
-    size: "2.4 MB",
-    dateAdded: "Oct 18, 2026",
-    type: "image",
-  },
-  {
-    id: "doc4",
-    name: "Oktoberfest_Tent_Tickets.pdf",
-    category: "Activity",
-    size: "450 KB",
-    dateAdded: "Nov 02, 2026",
-    type: "pdf",
-  },
-  {
-    id: "doc5",
-    name: "Eurail_Pass_QR.png",
-    category: "Other",
-    size: "1.8 MB",
-    dateAdded: "Nov 05, 2026",
-    type: "image",
-  },
-]
+import { toast } from "sonner"
+import {
+  getTripDocuments,
+  uploadTripDocument,
+  deleteTripDocument,
+  getDocumentUrl,
+  type TripDocument,
+  type Category,
+} from "@/lib/supabase-trip-docs"
+import { useTripPage } from "@/components/trips/trip-shell"
 
 const categoryColors: Record<Category, string> = {
   Flight: "bg-blue-500/10 text-blue-600 border-blue-200",
@@ -86,22 +41,111 @@ const categoryColors: Record<Category, string> = {
   Other: "bg-slate-500/10 text-slate-600 border-slate-200",
 }
 
-const typeIcons = {
+const typeIcons: Record<string, React.ElementType> = {
   pdf: FileTextIcon,
   image: ImageIcon,
   doc: FileIcon,
 }
 
-// --- Component ---
+function formatBytes(bytes: number, decimals = 2) {
+  if (!+bytes) return "0 Bytes"
+  const k = 1024
+  const dm = decimals < 0 ? 0 : decimals
+  const sizes = ["Bytes", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`
+}
 
 export function DocsPageContent() {
+  const trip = useTripPage()
+  const tripId = trip?.id
+
   const [activeCategory, setActiveCategory] = React.useState<Category | "All">("All")
   const [isDragActive, setIsDragActive] = React.useState(false)
+  
+  const [documents, setDocuments] = React.useState<TripDocument[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [uploading, setUploading] = React.useState(false)
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
+
+  // Fetch documents on mount
+  React.useEffect(() => {
+    if (!tripId) return
+    async function fetchDocs() {
+      try {
+        const docs = await getTripDocuments(tripId!)
+        setDocuments(docs)
+      } catch (err: any) {
+        toast.error("Failed to load documents", { description: err.message })
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchDocs()
+  }, [tripId])
 
   const filteredDocs = React.useMemo(() => {
-    if (activeCategory === "All") return mockDocuments
-    return mockDocuments.filter((d) => d.category === activeCategory)
-  }, [activeCategory])
+    if (activeCategory === "All") return documents
+    return documents.filter((d) => d.category === activeCategory)
+  }, [activeCategory, documents])
+
+  // Process selected files
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0 || !tripId) return
+    setUploading(true)
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      if (file.size > 10 * 1024 * 1024) {
+        toast.error(`${file.name} is too large. Max 10MB.`)
+        continue
+      }
+      
+      const toastId = toast.loading(`Uploading ${file.name}...`)
+      try {
+        // Simple heuristic for category, user can't select it currently in this UI version
+        let category: Category = "Other"
+        const nameLower = file.name.toLowerCase()
+        if (nameLower.includes("flight") || nameLower.includes("ticket") || nameLower.includes("boarding")) category = "Flight"
+        if (nameLower.includes("hotel") || nameLower.includes("booking") || nameLower.includes("airbnb")) category = "Hotel"
+        if (nameLower.includes("passport") || nameLower.includes("visa") || nameLower.includes("id")) category = "ID/Visa"
+        
+        const newDoc = await uploadTripDocument(tripId, file, category)
+        setDocuments((prev) => [newDoc, ...prev])
+        toast.success(`${file.name} uploaded`, { id: toastId })
+      } catch (err: any) {
+        toast.error(`Failed to upload ${file.name}`, { description: err.message, id: toastId })
+      }
+    }
+    setUploading(false)
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  async function handleDownload(doc: TripDocument) {
+    try {
+      const url = await getDocumentUrl(doc.storage_path)
+      window.open(url, "_blank")
+    } catch (err: any) {
+      toast.error("Failed to generate download link", { description: err.message })
+    }
+  }
+
+  async function handleDelete(doc: TripDocument) {
+    if (!confirm(`Are you sure you want to delete ${doc.name}?`)) return
+    
+    // Optimistic UI update
+    setDocuments((prev) => prev.filter((d) => d.id !== doc.id))
+    try {
+      await deleteTripDocument(doc.id, doc.storage_path)
+      toast.success("Document deleted")
+    } catch (err: any) {
+      // Revert on failure
+      setDocuments((prev) => [doc, ...prev])
+      toast.error("Failed to delete document", { description: err.message })
+    }
+  }
+
+  if (!tripId) return null
 
   return (
     <div className="space-y-8 pb-10">
@@ -114,23 +158,42 @@ export function DocsPageContent() {
           </p>
         </div>
 
-        {/* Drag and drop upload zone mock */}
+        {/* Hidden file input */}
+        <input 
+          type="file" 
+          ref={fileInputRef} 
+          className="hidden" 
+          multiple 
+          accept=".pdf,.png,.jpg,.jpeg,.doc,.docx" 
+          onChange={(e) => handleFiles(e.target.files)} 
+        />
+
+        {/* Drag and drop upload zone */}
         <div
-          className={`relative border-2 border-dashed rounded-lg p-10 mt-4 transition-colors flex flex-col items-center justify-center text-center 
-            ${isDragActive ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/30"}`}
-          onDragEnter={() => setIsDragActive(true)}
-          onDragLeave={() => setIsDragActive(false)}
-          onDrop={() => setIsDragActive(false)}
+          className={`relative border-2 border-dashed rounded-lg p-10 mt-4 transition-colors flex flex-col items-center justify-center text-center cursor-pointer
+            ${isDragActive ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/30"}
+            ${uploading ? "opacity-50 pointer-events-none" : ""}  
+          `}
+          onDragEnter={(e) => { e.preventDefault(); setIsDragActive(true); }}
+          onDragLeave={(e) => { e.preventDefault(); setIsDragActive(false); }}
+          onDrop={(e) => {
+            e.preventDefault()
+            setIsDragActive(false)
+            handleFiles(e.dataTransfer.files)
+          }}
           onDragOver={(e) => e.preventDefault()}
+          onClick={() => fileInputRef.current?.click()}
         >
           <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary mb-4">
-            <UploadCloudIcon className="size-6" />
+            {uploading ? <Loader2Icon className="size-6 animate-spin" /> : <UploadCloudIcon className="size-6" />}
           </div>
-          <h3 className="text-sm font-semibold">Click to upload or drag and drop</h3>
+          <h3 className="text-sm font-semibold">
+            {uploading ? "Uploading files..." : "Click to upload or drag and drop"}
+          </h3>
           <p className="text-xs text-muted-foreground mt-1 max-w-xs">
             PDF, PNG, JPG, or DOC (max. 10MB). Files are securely stored in Supabase.
           </p>
-          <Button variant="outline" size="sm" className="mt-4">
+          <Button variant="outline" size="sm" className="mt-4" disabled={uploading} onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>
             Select Files
           </Button>
         </div>
@@ -167,7 +230,11 @@ export function DocsPageContent() {
           </div>
         </div>
 
-        {filteredDocs.length === 0 ? (
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2Icon className="size-8 animate-spin text-muted-foreground/30" />
+          </div>
+        ) : filteredDocs.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 px-4 border border-dashed rounded-lg text-center">
             <FolderOpenIcon className="size-10 text-muted-foreground/30 mb-3" />
             <p className="text-sm font-medium">No documents found</p>
@@ -180,7 +247,9 @@ export function DocsPageContent() {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {filteredDocs.map((doc, i) => {
-              const Icon = typeIcons[doc.type]
+              const Icon = typeIcons[doc.file_type] || FileIcon
+              const dateAdded = new Date(doc.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+
               return (
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
@@ -199,9 +268,9 @@ export function DocsPageContent() {
                             {doc.name}
                           </CardTitle>
                           <CardDescription className="text-xs truncate flex items-center gap-2 mt-0.5">
-                            <span>{doc.size}</span>
+                            <span>{formatBytes(doc.file_size_bytes)}</span>
                             <span>&middot;</span>
-                            <span>{doc.dateAdded}</span>
+                            <span>{dateAdded}</span>
                           </CardDescription>
                         </div>
                       </div>
@@ -215,11 +284,11 @@ export function DocsPageContent() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleDownload(doc)}>
                               <DownloadIcon className="mr-2 size-4" />
-                              Download
+                              View / Download
                             </DropdownMenuItem>
-                            <DropdownMenuItem className="text-destructive focus:text-destructive">
+                            <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleDelete(doc)}>
                               <Trash2Icon className="mr-2 size-4" />
                               Delete
                             </DropdownMenuItem>
@@ -228,7 +297,7 @@ export function DocsPageContent() {
                       </div>
                     </CardHeader>
                     <CardContent className="p-4 pt-1">
-                      <Badge variant="outline" className={`text-[10px] h-5 px-1.5 ${categoryColors[doc.category]}`}>
+                      <Badge variant="outline" className={`text-[10px] h-5 px-1.5 ${categoryColors[doc.category] || categoryColors.Other}`}>
                         {doc.category}
                       </Badge>
                     </CardContent>
@@ -242,3 +311,4 @@ export function DocsPageContent() {
     </div>
   )
 }
+

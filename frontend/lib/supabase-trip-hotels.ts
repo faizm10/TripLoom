@@ -90,6 +90,25 @@ export async function saveTripHotelStayToSupabase(
   if (error) throw new Error(error.message)
 }
 
+function parseUtcNoonMs(isoDate: string): number {
+  return new Date(`${isoDate}T12:00:00.000Z`).getTime()
+}
+
+/** Sum nights across stays (check-out date is exclusive), skipping invalid ranges. */
+export function sumHotelStayNights(stays: TripHotelStay[]): number {
+  let sum = 0
+  for (const s of stays) {
+    const inStr = s.checkIn?.trim()
+    const outStr = s.checkOut?.trim()
+    if (!inStr || !outStr) continue
+    const a = parseUtcNoonMs(inStr)
+    const b = parseUtcNoonMs(outStr)
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) continue
+    sum += Math.round((b - a) / 86400000)
+  }
+  return sum
+}
+
 export async function deleteTripHotelStayFromSupabase(tripId: string, id: string): Promise<void> {
   const supabase = createClient()
   const { error } = await supabase

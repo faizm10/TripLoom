@@ -20,6 +20,7 @@ import {
   type FlightStopDetail,
   type SavedFlightRow,
 } from "@/lib/supabase-trip-flights"
+import { itineraryWithFlightsSummary } from "@/lib/trip-flight-itinerary-sync"
 import { summarizeFlights } from "@/lib/trip-manual-details"
 import type { Trip } from "@/lib/trips"
 
@@ -88,12 +89,15 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
 
   const syncTrip = React.useCallback(
     (nextEntries: SavedFlightRow[]) => {
+      const { itineraryItems, itineraryDaysPlanned } = itineraryWithFlightsSummary(trip, nextEntries)
       updateTrip(trip.id, {
         selectedFlights: nextEntries.length > 0,
         flightSummary: summarizeFlights(nextEntries),
+        itineraryItems,
+        itineraryDaysPlanned,
       })
     },
-    [trip.id, updateTrip]
+    [trip, updateTrip]
   )
 
   React.useEffect(() => {

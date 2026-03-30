@@ -44,10 +44,16 @@ function applyTripPatch(trip: Trip, partial: Partial<Trip>): Trip {
     ...partial,
     lastUpdated: new Date().toISOString().slice(0, 10),
   }
-  if (typeof partial.totalDays === "number" && Array.isArray(trip.itineraryItems)) {
+  if (partial.itineraryItems !== undefined) {
     merged.itineraryItems = coerceItinerary({
       ...merged,
-      itineraryItems: trip.itineraryItems,
+      itineraryItems: partial.itineraryItems,
+    })
+    merged.itineraryDaysPlanned = computeDaysPlanned(merged.itineraryItems)
+  } else if (typeof partial.totalDays === "number" && Array.isArray(merged.itineraryItems)) {
+    merged.itineraryItems = coerceItinerary({
+      ...merged,
+      itineraryItems: merged.itineraryItems,
     })
     merged.itineraryDaysPlanned = computeDaysPlanned(merged.itineraryItems)
   }
@@ -58,7 +64,7 @@ type TripsContextValue = {
   trips: Trip[]
   getTripById: (id: string) => Trip | undefined
   createTrip: (input: CreateTripInput) => Trip
-  deleteTrip: (id: string) => void
+  deleteTrip: (id: string) => Promise<void>
   updateTrip: (id: string, partial: Partial<Trip>) => void
   ensureTripInStore: (trip: Trip) => void
   setTripItineraryItems: (id: string, items: TripItineraryItem[]) => void
@@ -184,13 +190,13 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
       isGroupTrip: next.isGroupTrip,
       totalDays: next.totalDays,
     }).catch((e) => {
-      toast.error(
-        "Trip saved locally but could not sync to cloud.",
-        { description: e instanceof Error ? e.message : undefined }
-      )
+      toast.error("Could not save trip to cloud.", {
+        description: e instanceof Error ? e.message : undefined,
+      })
+      fetchTrips()
     })
     return next
-  }, [])
+  }, [fetchTrips])
 
   const ensureTripInStore = React.useCallback((trip: Trip) => {
     setTrips((prev) => {
@@ -339,14 +345,29 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
     )
   }, [])
 
-  const deleteTrip = React.useCallback((id: string) => {
-    setTrips((prev) => prev.filter((trip) => trip.id !== id))
-    deleteTripInSupabase(id).catch((e) => {
-      toast.error("Could not delete trip from cloud.", {
-        description: e instanceof Error ? e.message : undefined,
-      })
-    })
-  }, [])
+  const deleteTrip = React.useCallback(
+    async (id: string) => {
+      try {
+        await deleteTripInSupabase(id)
+        setTrips((prev) => {
+          const removed = prev.find((trip) => trip.id === id)
+          const next = prev.filter((trip) => trip.id !== id)
+          queueMicrotask(() => {
+            toast.success(
+              removed ? `${removed.destination} deleted` : "Trip deleted"
+            )
+          })
+          return next
+        })
+      } catch (e) {
+        toast.error("Could not delete trip from cloud.", {
+          description: e instanceof Error ? e.message : undefined,
+        })
+        fetchTrips()
+      }
+    },
+    [fetchTrips]
+  )
 
   const withFinanceMirrors = React.useCallback((trip: Trip, finance: TripFinance): Trip => {
     const summary = getFinanceSummary({ ...trip, finance })
@@ -593,9 +614,9 @@ export function useCreateTrip(): (input: CreateTripInput) => Trip {
   }))
 }
 
-export function useDeleteTrip(): (id: string) => void {
+export function useDeleteTrip(): (id: string) => Promise<void> {
   const ctx = React.useContext(TripsContext)
-  return ctx?.deleteTrip ?? (() => {})
+  return ctx?.deleteTrip ?? (async () => {})
 }
 
 export function useTrip(

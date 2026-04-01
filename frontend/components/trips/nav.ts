@@ -4,6 +4,7 @@ import {
   FileTextIcon,
   HotelIcon,
   LayoutDashboardIcon,
+  LuggageIcon,
   MapIcon,
   PlaneIcon,
   RouteIcon,
@@ -36,6 +37,7 @@ const baseTripNavItems: TripNavItem[] = [
   { key: "finance", label: "Finance", hrefSuffix: "/finance", icon: CircleDollarSignIcon },
   { key: "group", label: "Group", hrefSuffix: "/group", icon: UsersIcon },
   { key: "docs", label: "Documents", hrefSuffix: "/docs", icon: FileTextIcon },
+  { key: "packing", label: "Packing", hrefSuffix: "/packing", icon: LuggageIcon },
 ]
 
 /** Full nav list for international trips (default): no Buses & trains. */

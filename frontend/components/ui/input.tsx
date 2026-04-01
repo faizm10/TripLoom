@@ -2,9 +2,11 @@ import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
-function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+/** React 19: `ref` is a normal prop on function components (no forwardRef needed). */
+function Input({ className, type, ref, ...props }: React.ComponentPropsWithRef<"input">) {
   return (
     <input
+      ref={ref}
       type={type}
       data-slot="input"
       className={cn(

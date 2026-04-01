@@ -13,6 +13,11 @@ const milestones: { label: string; detail: string; status: Status }[] = [
     status: "done",
   },
   {
+    label: "Packing lists",
+    detail: "Personal and group trip checklists, synced storage, mobile-friendly editing.",
+    status: "done",
+  },
+  {
     label: "Flights",
     detail: "SerpAPI Google Flights search, return flights, booking options.",
     status: "done",
@@ -78,7 +83,7 @@ export function RoadmapSection() {
           Where we&apos;re at.
         </h2>
         <p className="mt-4 text-muted-foreground max-w-xl">
-          Eight milestones from first line of code to production polish. Transparent progress, no vaporware.
+          Nine milestones from first line of code to production polish. Transparent progress, no vaporware.
         </p>
       </div>
 

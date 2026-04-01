@@ -75,6 +75,10 @@ const pageCopy: Record<string, { title: string; subtitle: string }> = {
     title: "Documents",
     subtitle: "Keep tickets and confirmations together for quick access.",
   },
+  packing: {
+    title: "Packing",
+    subtitle: "Personal checklist and shared group items so nothing gets left behind.",
+  },
 }
 
 function getPageKey(pathname: string): string {
@@ -114,7 +118,11 @@ export function TripShell({
   }, [user?.id])
 
   const pageKey = getPageKey(pathname)
-  const header = pageCopy[pageKey] || pageCopy.overview
+  const baseHeader = pageCopy[pageKey] || pageCopy.overview
+  const header =
+    pageKey === "packing" && !trip.isGroupTrip
+      ? { ...baseHeader, subtitle: "Your personal checklist for this trip." }
+      : baseHeader
   const pageDetails = [
     `destination=${trip.destination}`,
     `dates=${trip.startDate} to ${trip.endDate}`,

@@ -18,6 +18,9 @@ npm run dev
 
 `frontend/.env.local`
 ```env
+# Server-only: required for public trip share links (token → trip payload). Never commit or prefix with NEXT_PUBLIC_.
+SUPABASE_SERVICE_ROLE_KEY=
+
 # Required
 SERPAPI_API_KEY=
 AERO_API_KEY=

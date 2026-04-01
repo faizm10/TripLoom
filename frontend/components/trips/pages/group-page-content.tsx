@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import { motion } from "framer-motion"
 import {
   UsersIcon,
@@ -8,205 +9,461 @@ import {
   LinkIcon,
   CopyIcon,
   MailIcon,
-  PlusIcon,
   MoreHorizontalIcon,
   CreditCardIcon,
   BriefcaseBusinessIcon,
+  EyeIcon,
+  UserPlusIcon,
+  BanIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { toast } from "sonner"
+import { useTripPage } from "@/components/trips/trip-shell"
+import { getTripMembers, type TripMember } from "@/lib/supabase-trip-members"
+import { createClient } from "@/lib/supabase/client"
+import {
+  createTripCollaboratorInviteAction,
+  createTripViewShareLinkAction,
+  getTripMemberRoleAction,
+  listTripCollaboratorInvitesAction,
+  listTripShareLinksAction,
+  revokeTripCollaboratorInviteAction,
+  revokeTripShareLinkAction,
+  type TripCollaboratorInviteSummary,
+  type TripShareLinkSummary,
+} from "@/lib/actions/trip-share-actions"
 
-// --- Mock Data --- 
-
-type Role = "Owner" | "Editor" | "Viewer"
-
-interface Member {
-  id: string
-  name: string
-  email: string
-  role: Role
-  avatarFallback: string
-  isCurrentUser?: boolean
+function shortUserId(userId: string): string {
+  return userId.length > 10 ? `${userId.slice(0, 6)}…${userId.slice(-4)}` : userId
 }
 
-const mockMembers: Member[] = [
-  {
-    id: "m1",
-    name: "Faiz Mustansar",
-    email: "faiz@triploom.com",
-    role: "Owner",
-    avatarFallback: "FM",
-    isCurrentUser: true,
-  },
-  {
-    id: "m2",
-    name: "Hamza Elmi",
-    email: "hamza@example.com",
-    role: "Editor",
-    avatarFallback: "HE",
-  },
-  {
-    id: "m3",
-    name: "Sarah Jenkins",
-    email: "sarah.j@example.com",
-    role: "Viewer",
-    avatarFallback: "SJ",
-  },
-]
+function roleLabel(role: string): string {
+  if (role === "owner") return "Owner"
+  if (role === "editor") return "Editor"
+  return "Viewer"
+}
 
-// --- Component ---
+function isLinkActive(row: { revoked_at: string | null; expires_at: string | null }): boolean {
+  if (row.revoked_at) return false
+  if (row.expires_at && new Date(row.expires_at) <= new Date()) return false
+  return true
+}
 
 export function GroupPageContent() {
+  const trip = useTripPage()
   const [inviteEmail, setInviteEmail] = React.useState("")
+  const [userId, setUserId] = React.useState<string | null>(null)
+  const [myRole, setMyRole] = React.useState<"owner" | "editor" | "viewer" | null>(null)
+  const [members, setMembers] = React.useState<TripMember[]>([])
+  const [viewLinks, setViewLinks] = React.useState<TripShareLinkSummary[]>([])
+  const [invites, setInvites] = React.useState<TripCollaboratorInviteSummary[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [creatingView, setCreatingView] = React.useState(false)
+  const [creatingCollab, setCreatingCollab] = React.useState(false)
+  const [lastViewUrl, setLastViewUrl] = React.useState<string | null>(null)
+  const [lastCollabUrl, setLastCollabUrl] = React.useState<string | null>(null)
 
-  function handleCopyLink() {
-    navigator.clipboard.writeText("https://triploom.com/invite/trp_8a7f92b")
-    toast.success("Invite link copied to clipboard!")
+  const tripId = trip?.id
+
+  React.useEffect(() => {
+    if (!tripId) return
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      try {
+        const supabase = createClient()
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+        if (cancelled) return
+        setUserId(user?.id ?? null)
+
+        const role = await getTripMemberRoleAction(tripId)
+        if (cancelled) return
+        setMyRole(role)
+
+        const memberRows = await getTripMembers(tripId)
+        if (cancelled) return
+        setMembers(memberRows)
+
+        if (role === "owner") {
+          const [v, inv] = await Promise.all([
+            listTripShareLinksAction(tripId),
+            listTripCollaboratorInvitesAction(tripId),
+          ])
+          if (cancelled) return
+          setViewLinks(v)
+          setInvites(inv)
+        }
+      } catch (e) {
+        if (!cancelled) toast.error(e instanceof Error ? e.message : "Could not load group data.")
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [tripId])
+
+  function fullUrl(path: string): string {
+    if (typeof window === "undefined") return path
+    return `${window.location.origin}${path}`
+  }
+
+  async function copyText(label: string, text: string) {
+    try {
+      await navigator.clipboard.writeText(text)
+      toast.success(`${label} copied`)
+    } catch {
+      toast.error("Could not copy")
+    }
+  }
+
+  async function handleCreateViewLink() {
+    if (!tripId) return
+    setCreatingView(true)
+    try {
+      const { sharePath } = await createTripViewShareLinkAction(tripId, { expiresInDays: null })
+      const url = fullUrl(sharePath)
+      setLastViewUrl(url)
+      setViewLinks(await listTripShareLinksAction(tripId))
+      await copyText("View link", url)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not create link")
+    } finally {
+      setCreatingView(false)
+    }
+  }
+
+  async function handleCreateCollabInvite() {
+    if (!tripId) return
+    setCreatingCollab(true)
+    try {
+      const { invitePath } = await createTripCollaboratorInviteAction(tripId, {
+        role: "editor",
+        expiresInDays: 14,
+      })
+      const url = fullUrl(invitePath)
+      setLastCollabUrl(url)
+      setInvites(await listTripCollaboratorInvitesAction(tripId))
+      await copyText("Invite link", url)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not create invite")
+    } finally {
+      setCreatingCollab(false)
+    }
+  }
+
+  async function handleRevokeView(id: string) {
+    if (!tripId) return
+    try {
+      await revokeTripShareLinkAction(id, tripId)
+      setViewLinks(await listTripShareLinksAction(tripId))
+      toast.success("View link revoked")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not revoke")
+    }
+  }
+
+  async function handleRevokeInvite(id: string) {
+    if (!tripId) return
+    try {
+      await revokeTripCollaboratorInviteAction(id, tripId)
+      setInvites(await listTripCollaboratorInvitesAction(tripId))
+      toast.success("Invite revoked")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not revoke")
+    }
   }
 
   function handleSendInvite(e: React.FormEvent) {
     e.preventDefault()
     if (!inviteEmail) return
-    toast.success(`Invite sent to ${inviteEmail}`)
+    toast.message("Email invites are not wired yet — use a collaborator link instead.")
     setInviteEmail("")
   }
 
+  if (!trip) {
+    return <p className="text-sm text-muted-foreground">Loading trip…</p>
+  }
+
+  const isOwner = myRole === "owner"
+
   return (
     <div className="space-y-8 pb-10">
-      
-      {/* Header */}
       <div>
         <h2 className="text-lg font-semibold tracking-tight">Group & Collaborators</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Invite friends to view or edit the itinerary. Split expenses and share packing lists.
+        <p className="mt-1 text-sm text-muted-foreground">
+          Invite collaborators with a secure link, or share a read-only link so others can view the trip
+          without signing in.
         </p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3 items-start">
-        
-        {/* Left Column: Members & Invites */}
-        <div className="lg:col-span-2 space-y-6">
-          
-          {/* Members List */}
+      <div className="grid items-start gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-2">
           <Card>
-            <CardHeader className="pb-3 border-b">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <UsersIcon className="size-4" /> 
-                  Trip Members ({mockMembers.length})
-                </CardTitle>
-              </div>
+            <CardHeader className="border-b pb-3">
+              <CardTitle className="flex items-center gap-2 text-sm">
+                <UsersIcon className="size-4" />
+                Trip members ({loading ? "…" : members.length})
+              </CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              <ul className="divide-y divide-border">
-                {mockMembers.map((member) => (
-                  <li key={member.id} className="flex items-center justify-between p-4 hover:bg-muted/20 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="size-9 rounded-full border">
-                        <AvatarFallback className="text-xs bg-muted text-muted-foreground">
-                          {member.avatarFallback}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium">{member.name}</p>
-                          {member.isCurrentUser && (
-                            <Badge variant="secondary" className="text-[9px] px-1.5 h-4">You</Badge>
-                          )}
+              {loading ? (
+                <p className="p-4 text-sm text-muted-foreground">Loading members…</p>
+              ) : members.length === 0 ? (
+                <p className="p-4 text-sm text-muted-foreground">No members loaded.</p>
+              ) : (
+                <ul className="divide-y divide-border">
+                  {members.map((member) => {
+                    const isYou = member.user_id === userId
+                    const r = member.role
+                    return (
+                      <li
+                        key={`${member.trip_id}-${member.user_id}`}
+                        className="flex items-center justify-between p-4 transition-colors hover:bg-muted/20"
+                      >
+                        <div className="flex items-center gap-3">
+                          <Avatar className="size-9 rounded-full border">
+                            <AvatarFallback className="bg-muted text-xs text-muted-foreground">
+                              {shortUserId(member.user_id)
+                                .slice(0, 2)
+                                .toUpperCase()}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-medium font-mono">{shortUserId(member.user_id)}</p>
+                              {isYou ? (
+                                <Badge variant="secondary" className="h-4 px-1.5 text-[9px]">
+                                  You
+                                </Badge>
+                              ) : null}
+                            </div>
+                            <p className="text-xs text-muted-foreground">Account ID</p>
+                          </div>
                         </div>
-                        <p className="text-xs text-muted-foreground">{member.email}</p>
-                      </div>
-                    </div>
-                    
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center gap-1.5 text-xs">
-                        {member.role === "Owner" && <ShieldCheckIcon className="size-3.5 text-primary" />}
-                        <span className={member.role === "Owner" ? "font-medium text-primary" : "text-muted-foreground"}>
-                          {member.role}
-                        </span>
-                      </div>
-                      
-                      {!member.isCurrentUser && (
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground ml-2">
-                          <MoreHorizontalIcon className="size-4" />
-                        </Button>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1.5 text-xs">
+                            {r === "owner" ? (
+                              <ShieldCheckIcon className="size-3.5 text-primary" />
+                            ) : null}
+                            <span className={r === "owner" ? "font-medium text-primary" : "text-muted-foreground"}>
+                              {roleLabel(r)}
+                            </span>
+                          </div>
+                          {!isYou && isOwner ? (
+                            <Button variant="ghost" size="icon" className="ml-2 h-8 w-8 text-muted-foreground" disabled>
+                              <MoreHorizontalIcon className="size-4" />
+                            </Button>
+                          ) : null}
+                        </div>
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
             </CardContent>
           </Card>
 
-          {/* Invite Section */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm">Invite Travelers</CardTitle>
               <CardDescription className="text-xs">
-                Send an email invitation or share a secure link to join this trip.
+                Collaborator links add signed-in users as editors. View links are read-only and work without an
+                account.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              
               <form onSubmit={handleSendInvite} className="flex gap-2">
                 <div className="relative flex-1">
-                  <MailIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                  <Input 
-                    type="email" 
-                    placeholder="Email address" 
+                  <MailIcon className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="email"
+                    placeholder="Email address (coming soon)"
                     className="pl-9 text-sm"
                     value={inviteEmail}
                     onChange={(e) => setInviteEmail(e.target.value)}
+                    disabled
                   />
                 </div>
-                <Button type="submit" size="sm" variant="secondary" disabled={!inviteEmail}>
+                <Button type="submit" size="sm" variant="secondary" disabled>
                   Invite
                 </Button>
               </form>
 
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center">
-                  <span className="w-full border-t border-border" />
-                </div>
-                <div className="relative flex justify-center text-[10px] uppercase">
-                  <span className="bg-card px-2 text-muted-foreground">Or share link</span>
-                </div>
-              </div>
+              {isOwner ? (
+                <>
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <span className="w-full border-t border-border" />
+                    </div>
+                    <div className="relative flex justify-center text-[10px] uppercase">
+                      <span className="bg-card px-2 text-muted-foreground">Share links (owner only)</span>
+                    </div>
+                  </div>
 
-              <div className="flex items-center gap-2 border bg-muted/30 p-1 pl-3 rounded-md">
-                <LinkIcon className="size-3.5 text-muted-foreground shrink-0" />
-                <span className="text-xs text-muted-foreground truncate flex-1 font-mono">
-                  triploom.com/invite/trp_8a7f92b
-                </span>
-                <Button size="sm" variant="ghost" className="h-7 px-2 shrink-0" onClick={handleCopyLink}>
-                  <CopyIcon className="size-3.5 mr-1" />
-                  Copy
-                </Button>
-              </div>
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={creatingView}
+                        onClick={() => void handleCreateViewLink()}
+                        className="touch-manipulation"
+                      >
+                        <EyeIcon className="mr-1.5 size-3.5" />
+                        {creatingView ? "Creating…" : "New view-only link"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="default"
+                        disabled={creatingCollab}
+                        onClick={() => void handleCreateCollabInvite()}
+                        className="touch-manipulation"
+                      >
+                        <UserPlusIcon className="mr-1.5 size-3.5" />
+                        {creatingCollab ? "Creating…" : "New collaborator invite"}
+                      </Button>
+                    </div>
 
+                    {lastViewUrl ? (
+                      <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 p-2 pl-3">
+                        <LinkIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="flex-1 truncate font-mono text-xs text-muted-foreground">{lastViewUrl}</span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 shrink-0 px-2"
+                          onClick={() => void copyText("View link", lastViewUrl)}
+                        >
+                          <CopyIcon className="mr-1 size-3.5" />
+                          Copy
+                        </Button>
+                      </div>
+                    ) : null}
+
+                    {lastCollabUrl ? (
+                      <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 p-2 pl-3">
+                        <LinkIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="flex-1 truncate font-mono text-xs text-muted-foreground">
+                          {lastCollabUrl}
+                        </span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 shrink-0 px-2"
+                          onClick={() => void copyText("Invite link", lastCollabUrl)}
+                        >
+                          <CopyIcon className="mr-1 size-3.5" />
+                          Copy
+                        </Button>
+                      </div>
+                    ) : null}
+
+                    {viewLinks.length > 0 ? (
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">Active view links</p>
+                        <ul className="space-y-2 text-xs">
+                          {viewLinks.map((l) => (
+                            <li
+                              key={l.id}
+                              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/80 px-3 py-2"
+                            >
+                              <span className={isLinkActive(l) ? "text-foreground" : "text-muted-foreground line-through"}>
+                                {l.label || "View link"} ·{" "}
+                                {l.expires_at ? `expires ${l.expires_at.slice(0, 10)}` : "no expiry"}
+                              </span>
+                              {isOwner && isLinkActive(l) ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 text-destructive"
+                                  onClick={() => void handleRevokeView(l.id)}
+                                >
+                                  <BanIcon className="mr-1 size-3" />
+                                  Revoke
+                                </Button>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+
+                    {invites.length > 0 ? (
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">Collaborator invites</p>
+                        <ul className="space-y-2 text-xs">
+                          {invites.map((inv) => (
+                            <li
+                              key={inv.id}
+                              className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/80 px-3 py-2"
+                            >
+                              <span className={isLinkActive(inv) ? "text-foreground" : "text-muted-foreground line-through"}>
+                                {roleLabel(inv.role)} · {inv.uses_count} uses
+                                {inv.max_uses != null ? ` / ${inv.max_uses}` : ""}
+                                {inv.expires_at ? ` · exp ${inv.expires_at.slice(0, 10)}` : ""}
+                              </span>
+                              {isOwner && isLinkActive(inv) ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 text-destructive"
+                                  onClick={() => void handleRevokeInvite(inv.id)}
+                                >
+                                  <BanIcon className="mr-1 size-3" />
+                                  Revoke
+                                </Button>
+                              ) : null}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Only the trip owner can create or revoke share links.{" "}
+                  <Link href={`/trips/${trip.id}/overview`} className="text-primary underline-offset-4 hover:underline">
+                    Overview
+                  </Link>
+                </p>
+              )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Right Column: Group Modules */}
         <div className="space-y-4">
-           {/* Split Expenses Stub */}
-           <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.2 }}>
-            <Card className="bg-gradient-to-br from-emerald-500/10 to-teal-500/5 border-emerald-500/20 cursor-pointer group">
+          <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.2 }}>
+            <Card className="group cursor-pointer border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-teal-500/5">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
-                  <div className="flex h-8 w-8 items-center justify-center bg-emerald-500/20 text-emerald-600 rounded-md">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-emerald-500/20 text-emerald-600">
                     <CreditCardIcon className="size-4" />
                   </div>
-                  <Badge variant="outline" className="border-emerald-500/30 text-emerald-600 bg-white/50 backdrop-blur-sm">
+                  <Badge
+                    variant="outline"
+                    className="border-emerald-500/30 bg-white/50 text-emerald-600 backdrop-blur-sm dark:bg-background/50"
+                  >
                     Coming Soon
                   </Badge>
                 </div>
-                <CardTitle className="text-sm mt-3 group-hover:text-emerald-700 transition-colors">Split Expenses</CardTitle>
+                <CardTitle className="mt-3 text-sm transition-colors group-hover:text-emerald-700">
+                  Split Expenses
+                </CardTitle>
                 <CardDescription className="text-xs">
                   Track shared costs, settle up automatically in multiple currencies.
                 </CardDescription>
@@ -214,27 +471,30 @@ export function GroupPageContent() {
             </Card>
           </motion.div>
 
-          {/* Shared Packing List Stub */}
           <motion.div whileHover={{ y: -2 }} transition={{ duration: 0.2 }}>
-            <Card className="bg-gradient-to-br from-indigo-500/10 to-blue-500/5 border-indigo-500/20 cursor-pointer group">
+            <Card className="group cursor-pointer border-indigo-500/20 bg-gradient-to-br from-indigo-500/10 to-blue-500/5">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
-                  <div className="flex h-8 w-8 items-center justify-center bg-indigo-500/20 text-indigo-600 rounded-md">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-indigo-500/20 text-indigo-600">
                     <BriefcaseBusinessIcon className="size-4" />
                   </div>
-                  <Badge variant="outline" className="border-indigo-500/30 text-indigo-600 bg-white/50 backdrop-blur-sm">
-                    Coming Soon
+                  <Badge
+                    variant="outline"
+                    className="border-indigo-500/30 bg-white/50 text-indigo-600 backdrop-blur-sm dark:bg-background/50"
+                  >
+                    Live
                   </Badge>
                 </div>
-                <CardTitle className="text-sm mt-3 group-hover:text-indigo-700 transition-colors">Shared Packing List</CardTitle>
+                <CardTitle className="mt-3 text-sm transition-colors group-hover:text-indigo-700">
+                  Packing list
+                </CardTitle>
                 <CardDescription className="text-xs">
-                  See who is bringing shared items like adapters, cameras, and sunblock.
+                  Personal and group checklists are on the Packing tab.
                 </CardDescription>
               </CardHeader>
             </Card>
           </motion.div>
         </div>
-
       </div>
     </div>
   )

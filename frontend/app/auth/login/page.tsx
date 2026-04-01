@@ -9,11 +9,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createClient } from "@/lib/supabase/client"
+import { safeAuthRedirectPath } from "@/lib/auth-redirect"
 
 function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const callbackError = searchParams.get("error")
+  const afterLogin = safeAuthRedirectPath(searchParams.get("redirect"))
 
   const [email, setEmail] = React.useState("")
   const [password, setPassword] = React.useState("")
@@ -38,7 +40,7 @@ function LoginForm() {
       return
     }
 
-    router.push("/dashboard")
+    router.push(afterLogin)
     router.refresh()
   }
 
@@ -46,9 +48,12 @@ function LoginForm() {
     setOauthLoading(true)
     setError(null)
     const supabase = createClient()
+    const next = encodeURIComponent(afterLogin)
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=${next}`,
+      },
     })
     if (error) {
       setError(error.message)

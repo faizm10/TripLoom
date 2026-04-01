@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import { Analytics } from "@vercel/analytics/next"
 import { Geist, Geist_Mono, Outfit } from "next/font/google"
 import { ThemeProvider } from "next-themes"
 import { TripsProvider } from "@/components/providers/trips-provider"
@@ -104,6 +105,7 @@ export default function RootLayout({
             <Toaster richColors position="top-right" />
           </TripsProvider>
         </ThemeProvider>
+        <Analytics />
       </body>
     </html>
   )

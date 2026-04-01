@@ -2,6 +2,15 @@ import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
 
 export async function middleware(request: NextRequest) {
+  const { pathname, searchParams } = request.nextUrl
+
+  // Supabase sometimes redirects to Site URL root (`/?code=...`) instead of `/auth/callback`.
+  if (pathname === "/" && searchParams.has("code")) {
+    const url = request.nextUrl.clone()
+    url.pathname = "/auth/callback"
+    return NextResponse.redirect(url)
+  }
+
   let supabaseResponse = NextResponse.next({ request })
 
   const supabase = createServerClient(
@@ -29,8 +38,6 @@ export async function middleware(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser()
-
-  const { pathname } = request.nextUrl
 
   // Protect dashboard and trips — redirect to login if unauthenticated
   const isProtected =

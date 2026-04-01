@@ -238,6 +238,25 @@ export function PackingPageContent() {
                       void persistItem(scope, { ...item, label: trimmed }, setList)
                     }}
                     onKeyDown={(e) => {
+                      const trimmedPreview = e.currentTarget.value.trim()
+                      if (
+                        (e.key === "Backspace" || e.key === "Delete") &&
+                        trimmedPreview.length === 0
+                      ) {
+                        e.preventDefault()
+                        const idx = items.findIndex((r) => r.id === item.id)
+                        if (idx < 0) return
+                        void removeItem(scope, item.id, setList)
+                        if (idx > 0) {
+                          const prevId = items[idx - 1].id
+                          requestAnimationFrame(() => inputRefs.current.get(prevId)?.focus())
+                        } else if (items.length > 1) {
+                          const nextId = items[1].id
+                          requestAnimationFrame(() => inputRefs.current.get(nextId)?.focus())
+                        }
+                        return
+                      }
+
                       if (e.key !== "Enter") return
                       e.preventDefault()
                       const input = e.currentTarget

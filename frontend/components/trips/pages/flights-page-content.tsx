@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Link from "next/link"
 import { PencilIcon, PlaneIcon, PlusIcon, Trash2Icon } from "lucide-react"
 import { toast } from "sonner"
 
@@ -20,9 +21,11 @@ import {
   type FlightStopDetail,
   type SavedFlightRow,
 } from "@/lib/supabase-trip-flights"
-import { itineraryWithFlightsSummary } from "@/lib/trip-flight-itinerary-sync"
-import { summarizeFlights } from "@/lib/trip-manual-details"
+import { getTripGroundTripsFromSupabase } from "@/lib/supabase-trip-ground"
+import { itineraryWithTransportSummary } from "@/lib/trip-flight-itinerary-sync"
+import { summarizeFlights, summarizeGroundTrips } from "@/lib/trip-manual-details"
 import type { Trip } from "@/lib/trips"
+import { getTripTravelScope } from "@/lib/trips"
 
 const LEG_OPTIONS: Array<{ value: FlightLegType; label: string }> = [
   { value: "outbound", label: "Outbound" },
@@ -88,11 +91,21 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
   const [saving, setSaving] = React.useState(false)
 
   const syncTrip = React.useCallback(
-    (nextEntries: SavedFlightRow[]) => {
-      const { itineraryItems, itineraryDaysPlanned } = itineraryWithFlightsSummary(trip, nextEntries)
+    async (nextEntries: SavedFlightRow[]) => {
+      const ground =
+        getTripTravelScope(trip) === "domestic"
+          ? await getTripGroundTripsFromSupabase(trip.id)
+          : []
+      const { itineraryItems, itineraryDaysPlanned } = itineraryWithTransportSummary(
+        trip,
+        nextEntries,
+        ground
+      )
       updateTrip(trip.id, {
         selectedFlights: nextEntries.length > 0,
+        selectedGroundTransport: ground.length > 0,
         flightSummary: summarizeFlights(nextEntries),
+        groundTransportSummary: summarizeGroundTrips(ground),
         itineraryItems,
         itineraryDaysPlanned,
       })
@@ -108,7 +121,7 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
         if (cancelled) return
         const nextEntries = sortFlights(rows)
         setEntries(nextEntries)
-        syncTrip(nextEntries)
+        void syncTrip(nextEntries)
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -199,7 +212,7 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
           : [nextEntry, ...entries]
       )
       setEntries(nextEntries)
-      syncTrip(nextEntries)
+      void syncTrip(nextEntries)
       resetForm()
       toast.success(editingId ? "Flight updated." : "Flight added.")
     } catch (error) {
@@ -230,7 +243,7 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
   const handleDelete = async (id: string) => {
     const nextEntries = entries.filter((entry) => entry.id !== id)
     setEntries(nextEntries)
-    syncTrip(nextEntries)
+    void syncTrip(nextEntries)
     if (editingId === id) resetForm()
 
     try {
@@ -238,13 +251,22 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
       toast.success("Flight removed.")
     } catch (error) {
       setEntries(entries)
-      syncTrip(entries)
+      void syncTrip(entries)
       toast.error(error instanceof Error ? error.message : "Could not remove flight.")
     }
   }
 
   return (
     <div className="space-y-6">
+      {getTripTravelScope(trip) === "domestic" ? (
+        <p className="text-sm text-muted-foreground">
+          Domestic trip — you can log flights here, or use{" "}
+          <Link href={`/trips/${trip.id}/buses-trains`} className="text-primary font-medium underline-offset-4 hover:underline">
+            Buses & trains
+          </Link>{" "}
+          for rail and bus; either counts toward your travel plan.
+        </p>
+      ) : null}
       <Card className="border-primary/20 bg-gradient-to-br from-primary/5 via-background to-background">
         <CardHeader className="flex flex-row items-start justify-between gap-4">
           <div>

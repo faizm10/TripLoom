@@ -21,8 +21,9 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
+import { cn } from "@/lib/utils"
 import type { Trip } from "@/lib/trips"
-import { getDateRangeLabel, getMissingChecklist, getNextStep } from "@/lib/trips"
+import { getDateRangeLabel, getMissingChecklist, getNextStep, getTripTravelScope } from "@/lib/trips"
 
 const progressSteps = [
   "Trip Basics",
@@ -219,13 +220,28 @@ function OverviewPageBody({ trip }: { trip: Trip }) {
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+      <div
+        className={cn(
+          "grid gap-4 lg:grid-cols-2",
+          getTripTravelScope(trip) === "domestic" ? "xl:grid-cols-5" : "xl:grid-cols-4"
+        )}
+      >
         <Card>
           <CardHeader><CardTitle>Flights</CardTitle></CardHeader>
           <CardContent className="text-sm text-muted-foreground">
             {trip.selectedFlights ? trip.flightSummary || "Logged" : "No flights logged"}
           </CardContent>
         </Card>
+        {getTripTravelScope(trip) === "domestic" ? (
+          <Card>
+            <CardHeader><CardTitle>Buses & trains</CardTitle></CardHeader>
+            <CardContent className="text-sm text-muted-foreground">
+              {trip.selectedGroundTransport
+                ? trip.groundTransportSummary || "Logged"
+                : "None logged"}
+            </CardContent>
+          </Card>
+        ) : null}
         <Card>
           <CardHeader><CardTitle>Stay</CardTitle></CardHeader>
           <CardContent className="text-sm text-muted-foreground">

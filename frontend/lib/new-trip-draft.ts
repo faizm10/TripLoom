@@ -17,9 +17,12 @@ export function loadNewTripDraft(): NewTripDraft {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<NewTripDraft>
+      const parsed = JSON.parse(raw) as Partial<NewTripDraft> & {
+        countryOfResidence?: string
+        travelScope?: string
+      }
       return {
-        destination: parsed.destination ?? defaultDraft.destination,
+        destination: typeof parsed.destination === "string" ? parsed.destination : defaultDraft.destination,
         dateMode:
           parsed.dateMode && ["exact", "weekend", "flexible"].includes(parsed.dateMode)
             ? parsed.dateMode

@@ -15,7 +15,7 @@ export async function getTripByIdFromSupabase(tripId: string): Promise<Trip | nu
   const { data, error } = await supabase
     .from("trips")
     .select(
-      "id, destination, start_date, end_date, timezone, travelers, is_group_trip, total_days, created_at, updated_at"
+      "id, destination, start_date, end_date, timezone, travelers, is_group_trip, total_days, travel_scope, created_at, updated_at"
     )
     .eq("id", tripId)
     .single()

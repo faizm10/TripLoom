@@ -1,4 +1,4 @@
-import type { Trip } from "@/lib/trips"
+import type { TravelScope, Trip } from "@/lib/trips"
 
 export type TripRow = {
   id: string
@@ -9,6 +9,7 @@ export type TripRow = {
   travelers?: number | null
   is_group_trip?: boolean | null
   total_days?: number | null
+  travel_scope?: string | null
   created_at?: string
   updated_at?: string
 }
@@ -18,6 +19,10 @@ function totalDaysFromRange(startDate: string, endDate: string): number {
   const end = new Date(endDate)
   const diff = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24))
   return Math.max(1, diff + 1)
+}
+
+function travelScopeFromRow(value: string | null | undefined): TravelScope {
+  return value === "domestic" ? "domestic" : "international"
 }
 
 export function tripFromRow(row: TripRow): Trip {
@@ -37,7 +42,9 @@ export function tripFromRow(row: TripRow): Trip {
     status: "planning",
     lastUpdated,
     progress: 0,
+    travelScope: travelScopeFromRow(row.travel_scope),
     selectedFlights: false,
+    selectedGroundTransport: false,
     selectedHotel: false,
     itineraryDaysPlanned: 0,
     itineraryItems: [],

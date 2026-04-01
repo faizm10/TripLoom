@@ -1,4 +1,5 @@
 import type { SavedFlightRow } from "@/lib/supabase-trip-flights"
+import type { SavedGroundTripRow } from "@/lib/supabase-trip-ground"
 import type { ItineraryTimeBlock, Trip, TripItineraryItem } from "@/lib/trips"
 import { computeItineraryDaysPlanned, getTripItineraryItems } from "@/lib/trips"
 
@@ -10,33 +11,55 @@ export function autoFlightItemId(tripId: string, leg: "outbound" | "inbound"): s
   return `${tripId}:auto-flight:${leg}`
 }
 
-function dayIndexForFlightDate(trip: Trip, flightDate: string): number {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(flightDate)) return 1
+export function autoGroundItemId(tripId: string, leg: "outbound" | "inbound"): string {
+  return `${tripId}:auto-ground:${leg}`
+}
+
+function dayIndexForTravelDate(trip: Trip, travelDate: string): number {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(travelDate)) return 1
   const start = parseUtcNoonMs(trip.startDate)
   const end = parseUtcNoonMs(trip.endDate)
-  const flight = parseUtcNoonMs(flightDate)
-  if (![start, end, flight].every(Number.isFinite)) return 1
-  if (flight <= start) return 1
-  if (flight >= end) return Math.max(1, trip.totalDays)
-  const day = Math.floor((flight - start) / 86400000) + 1
+  const d = parseUtcNoonMs(travelDate)
+  if (![start, end, d].every(Number.isFinite)) return 1
+  if (d <= start) return 1
+  if (d >= end) return Math.max(1, trip.totalDays)
+  const day = Math.floor((d - start) / 86400000) + 1
   return Math.min(Math.max(1, day), Math.max(1, trip.totalDays))
 }
 
-function pickOutbound(flights: SavedFlightRow[]): SavedFlightRow | undefined {
+function stripAutoTransportItems(trip: Trip): TripItineraryItem[] {
+  return getTripItineraryItems(trip).filter(
+    (item) => !item.id.includes(":auto-flight:") && !item.id.includes(":auto-ground:")
+  )
+}
+
+function pickOutboundFlight(flights: SavedFlightRow[]): SavedFlightRow | undefined {
   const pool = flights.filter((f) => f.source === "outbound" || f.source === "one_way")
   if (pool.length === 0) return undefined
   return [...pool].sort((a, b) => (a.date || "").localeCompare(b.date || ""))[0]
 }
 
-function pickInbound(flights: SavedFlightRow[]): SavedFlightRow | undefined {
+function pickInboundFlight(flights: SavedFlightRow[]): SavedFlightRow | undefined {
   const pool = flights.filter((f) => f.source === "inbound")
   if (pool.length === 0) return undefined
   return [...pool].sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0]
 }
 
-function buildAutoItem(trip: Trip, leg: "outbound" | "inbound", flight: SavedFlightRow): TripItineraryItem {
+function pickOutboundGround(ground: SavedGroundTripRow[]): SavedGroundTripRow | undefined {
+  const pool = ground.filter((g) => g.source === "outbound" || g.source === "one_way")
+  if (pool.length === 0) return undefined
+  return [...pool].sort((a, b) => (a.date || "").localeCompare(b.date || ""))[0]
+}
+
+function pickInboundGround(ground: SavedGroundTripRow[]): SavedGroundTripRow | undefined {
+  const pool = ground.filter((g) => g.source === "inbound")
+  if (pool.length === 0) return undefined
+  return [...pool].sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0]
+}
+
+function buildFlightAutoItem(trip: Trip, leg: "outbound" | "inbound", flight: SavedFlightRow): TripItineraryItem {
   const now = new Date().toISOString()
-  const dayIndex = dayIndexForFlightDate(trip, flight.date)
+  const dayIndex = dayIndexForTravelDate(trip, flight.date)
   const timeBlock: ItineraryTimeBlock = leg === "outbound" ? "morning" : "evening"
   const category = leg === "outbound" ? "outbound_flight" : "inbound_flight"
   const route = flight.route.trim()
@@ -64,21 +87,79 @@ function buildAutoItem(trip: Trip, leg: "outbound" | "inbound", flight: SavedFli
   }
 }
 
+function buildGroundAutoItem(trip: Trip, leg: "outbound" | "inbound", row: SavedGroundTripRow): TripItineraryItem {
+  const now = new Date().toISOString()
+  const dayIndex = dayIndexForTravelDate(trip, row.date)
+  const timeBlock: ItineraryTimeBlock = leg === "outbound" ? "morning" : "evening"
+  const route = row.route.trim()
+  const svc = row.serviceNumber.trim()
+  const title =
+    route && svc ? `${route} · ${svc}` : route || (leg === "outbound" ? "Outbound bus/train" : "Return bus/train")
+  const noteBits = [row.operator.trim(), row.departure && `Dep ${row.departure}`, row.arrival && `Arr ${row.arrival}`].filter(
+    Boolean
+  ) as string[]
+  const notes = noteBits.length > 0 ? noteBits.join(" · ") : undefined
+
+  return {
+    id: autoGroundItemId(trip.id, leg),
+    tripId: trip.id,
+    dayIndex,
+    timeBlock,
+    status: "planned",
+    category: "commute",
+    title,
+    locationLabel: route || (leg === "outbound" ? "Departure" : "Return"),
+    notes,
+    sortOrder: leg === "outbound" ? 6 : 16,
+    createdAt: now,
+    updatedAt: now,
+  }
+}
+
 /**
- * Drops prior auto-generated flight rows and re-adds itinerary rows from saved outbound/inbound legs.
+ * Drops auto flight + auto ground rows and re-adds from saved legs (flights take outbound/inbound slots first; ground fills only if no flight on that leg).
  */
-export function mergeFlightLegsIntoItinerary(trip: Trip, flights: SavedFlightRow[]): TripItineraryItem[] {
-  const existing = getTripItineraryItems(trip).filter((item) => !item.id.includes(":auto-flight:"))
-  const outbound = pickOutbound(flights)
-  const inbound = pickInbound(flights)
+export function mergeTransportLegsIntoItinerary(
+  trip: Trip,
+  flights: SavedFlightRow[],
+  groundTrips: SavedGroundTripRow[]
+): TripItineraryItem[] {
+  const existing = stripAutoTransportItems(trip)
   const added: TripItineraryItem[] = []
-  if (outbound) added.push(buildAutoItem(trip, "outbound", outbound))
-  if (inbound) added.push(buildAutoItem(trip, "inbound", inbound))
+
+  const obF = pickOutboundFlight(flights)
+  const ibF = pickInboundFlight(flights)
+  const obG = pickOutboundGround(groundTrips)
+  const ibG = pickInboundGround(groundTrips)
+
+  if (obF) added.push(buildFlightAutoItem(trip, "outbound", obF))
+  else if (obG) added.push(buildGroundAutoItem(trip, "outbound", obG))
+
+  if (ibF) added.push(buildFlightAutoItem(trip, "inbound", ibF))
+  else if (ibG) added.push(buildGroundAutoItem(trip, "inbound", ibG))
+
   return [...existing, ...added]
 }
 
+/** @deprecated Use mergeTransportLegsIntoItinerary with empty ground. */
+export function mergeFlightLegsIntoItinerary(trip: Trip, flights: SavedFlightRow[]): TripItineraryItem[] {
+  return mergeTransportLegsIntoItinerary(trip, flights, [])
+}
+
 export function itineraryWithFlightsSummary(trip: Trip, flights: SavedFlightRow[]) {
-  const itineraryItems = mergeFlightLegsIntoItinerary(trip, flights)
+  const itineraryItems = mergeTransportLegsIntoItinerary(trip, flights, [])
+  return {
+    itineraryItems,
+    itineraryDaysPlanned: computeItineraryDaysPlanned(itineraryItems),
+  }
+}
+
+export function itineraryWithTransportSummary(
+  trip: Trip,
+  flights: SavedFlightRow[],
+  groundTrips: SavedGroundTripRow[]
+) {
+  const itineraryItems = mergeTransportLegsIntoItinerary(trip, flights, groundTrips)
   return {
     itineraryItems,
     itineraryDaysPlanned: computeItineraryDaysPlanned(itineraryItems),

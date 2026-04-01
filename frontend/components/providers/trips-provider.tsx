@@ -51,6 +51,7 @@ function mergePersistedTripOverview(client: Trip, fromServer: Trip): Trip {
     isGroupTrip: fromServer.isGroupTrip,
     totalDays: fromServer.totalDays,
     lastUpdated: fromServer.lastUpdated,
+    travelScope: fromServer.travelScope ?? client.travelScope,
   }
   if (totalDaysChanged && Array.isArray(merged.itineraryItems) && merged.itineraryItems.length > 0) {
     const items = coerceItinerary({
@@ -75,7 +76,8 @@ function serverOverviewMatches(client: Trip, fromServer: Trip): boolean {
     client.travelers === fromServer.travelers &&
     client.isGroupTrip === fromServer.isGroupTrip &&
     client.totalDays === fromServer.totalDays &&
-    client.lastUpdated === fromServer.lastUpdated
+    client.lastUpdated === fromServer.lastUpdated &&
+    (client.travelScope ?? "international") === (fromServer.travelScope ?? "international")
   )
 }
 
@@ -217,7 +219,9 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
       status: "planning",
       lastUpdated: new Date().toISOString().slice(0, 10),
       progress: 0,
+      travelScope: input.travelScope,
       selectedFlights: false,
+      selectedGroundTransport: false,
       selectedHotel: false,
       itineraryDaysPlanned: 0,
       itineraryItems: [],
@@ -241,6 +245,7 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
       travelers: next.travelers,
       isGroupTrip: next.isGroupTrip,
       totalDays: next.totalDays,
+      travelScope: next.travelScope ?? "international",
     }).catch((e) => {
       toast.error("Could not save trip to cloud.", {
         description: e instanceof Error ? e.message : undefined,
@@ -275,7 +280,8 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
         "timezone" in partial ||
         "travelers" in partial ||
         "isGroupTrip" in partial ||
-        "totalDays" in partial
+        "totalDays" in partial ||
+        "travelScope" in partial
 
       const persistOverview = (payload: UpdateTripPayload) => {
         if (Object.keys(payload).length === 0) return
@@ -315,6 +321,7 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
             travelers: next.travelers,
             isGroupTrip: next.isGroupTrip,
             totalDays: next.totalDays,
+            travelScope: next.travelScope,
           })
         }
 
@@ -660,7 +667,9 @@ export function useCreateTrip(): (input: CreateTripInput) => Trip {
     status: "planning",
     lastUpdated: new Date().toISOString().slice(0, 10),
     progress: 0,
+    travelScope: input.travelScope ?? "international",
     selectedFlights: false,
+    selectedGroundTransport: false,
     selectedHotel: false,
     itineraryDaysPlanned: 0,
     itineraryItems: [],

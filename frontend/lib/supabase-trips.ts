@@ -12,6 +12,7 @@ export type CreateTripPayload = {
   travelers: number
   isGroupTrip: boolean
   totalDays: number
+  travelScope: "domestic" | "international"
 }
 
 /**
@@ -28,7 +29,7 @@ export async function getTripsFromSupabase(): Promise<Trip[]> {
   const { data: rows, error } = await supabase
     .from("trips")
     .select(
-      "id, destination, start_date, end_date, timezone, travelers, is_group_trip, total_days, created_at, updated_at"
+      "id, destination, start_date, end_date, timezone, travelers, is_group_trip, total_days, travel_scope, created_at, updated_at"
     )
     .order("updated_at", { ascending: false })
   if (error) return []
@@ -58,6 +59,7 @@ export async function createTripInSupabase(payload: CreateTripPayload): Promise<
     travelers: payload.travelers,
     is_group_trip: payload.isGroupTrip,
     total_days: payload.totalDays,
+    travel_scope: payload.travelScope,
   })
   if (tripError) throw new Error(tripError.message)
 
@@ -77,6 +79,7 @@ export type UpdateTripPayload = {
   travelers?: number
   isGroupTrip?: boolean
   totalDays?: number
+  travelScope?: "domestic" | "international"
 }
 
 /**
@@ -106,6 +109,9 @@ export function tripOverviewPatchToPayload(partial: Partial<Trip>): UpdateTripPa
   if ("totalDays" in partial && partial.totalDays !== undefined) {
     payload.totalDays = partial.totalDays
   }
+  if ("travelScope" in partial && partial.travelScope !== undefined) {
+    payload.travelScope = partial.travelScope
+  }
   return payload
 }
 
@@ -122,6 +128,7 @@ export async function updateTripInSupabase(tripId: string, payload: UpdateTripPa
   if (payload.travelers != null) updates.travelers = payload.travelers
   if (payload.isGroupTrip != null) updates.is_group_trip = payload.isGroupTrip
   if (payload.totalDays != null) updates.total_days = payload.totalDays
+  if (payload.travelScope != null) updates.travel_scope = payload.travelScope
   if (Object.keys(updates).length <= 1) return
 
   const { error } = await supabase.from("trips").update(updates).eq("id", tripId)

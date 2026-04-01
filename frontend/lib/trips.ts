@@ -125,6 +125,8 @@ export type TripFinance = {
   automation: TripFinanceAutomation
 }
 
+export type TravelScope = "domestic" | "international"
+
 export type Trip = {
   id: string
   destination: string
@@ -136,7 +138,11 @@ export type Trip = {
   status: TripStatus
   lastUpdated: string
   progress: number
+  /** Domestic trips can satisfy “main transport” with flights or ground legs. */
+  travelScope?: TravelScope
   selectedFlights: boolean
+  selectedGroundTransport: boolean
+  groundTransportSummary?: string
   selectedHotel: boolean
   itineraryDaysPlanned: number
   totalDays: number
@@ -167,6 +173,7 @@ export type CreateTripInput = {
   destination: string
   dateMode: "exact" | "weekend" | "flexible"
   travelers: "solo" | "group"
+  travelScope: TravelScope
 }
 
 const DEFAULT_FINANCE_AUTOMATION: TripFinanceAutomation = {
@@ -310,10 +317,24 @@ export function getTripItineraryDaysPlanned(trip: Trip): number {
   return computeItineraryDaysPlanned(items)
 }
 
-/** Days with at least one non–flight-synced itinerary item (for “build itinerary” prompts). */
+/** Days with at least one non–auto-transport itinerary item (for “build itinerary” prompts). */
 export function getManualItineraryDaysPlanned(trip: Trip): number {
-  const items = getTripItineraryItems(trip).filter((item) => !item.id.includes(":auto-flight:"))
+  const items = getTripItineraryItems(trip).filter(
+    (item) => !item.id.includes(":auto-flight:") && !item.id.includes(":auto-ground:")
+  )
   return computeItineraryDaysPlanned(items)
+}
+
+export function getTripTravelScope(trip: Trip): TravelScope {
+  return trip.travelScope ?? "international"
+}
+
+/** International: flights required. Domestic: flights or bus/train required. */
+export function hasMainTransportLogged(trip: Trip): boolean {
+  if (getTripTravelScope(trip) === "domestic") {
+    return trip.selectedFlights || trip.selectedGroundTransport
+  }
+  return trip.selectedFlights
 }
 
 /** Nights between trip start and end (last night is trip end date). */
@@ -450,7 +471,9 @@ export function createFallbackTrip(tripId: string): Trip {
     status: "planning",
     lastUpdated: new Date().toISOString().slice(0, 10),
     progress: 0,
+    travelScope: "international",
     selectedFlights: false,
+    selectedGroundTransport: false,
     selectedHotel: false,
     itineraryDaysPlanned: 0,
     itineraryItems: [],
@@ -766,7 +789,20 @@ export function getNextStep(trip: Trip): {
   cta: string
   recommendations: string[]
 } {
-  if (!trip.selectedFlights) {
+  if (!hasMainTransportLogged(trip)) {
+    if (getTripTravelScope(trip) === "domestic") {
+      return {
+        title: "Add how you're traveling",
+        description:
+          "For trips within your country, log at least one flight or a bus & train leg so the plan stays complete.",
+        href: `/trips/${trip.id}/flights`,
+        cta: "Add travel",
+        recommendations: [
+          "Use Flights for any air segments",
+          "Taking rail or bus? Use Buses & trains in the sidebar",
+        ],
+      }
+    }
     return {
       title: "Add your flights",
       description: "Log the flights you plan to take so the trip details stay complete.",
@@ -864,7 +900,13 @@ export function getNextStep(trip: Trip): {
 
 export function getMissingChecklist(trip: Trip): string[] {
   const missing: string[] = []
-  if (!trip.selectedFlights) missing.push("Flights not added")
+  if (!hasMainTransportLogged(trip)) {
+    missing.push(
+      getTripTravelScope(trip) === "domestic"
+        ? "No flights or bus/train trips logged"
+        : "Flights not added"
+    )
+  }
   if (!hasStayCoverage(trip)) {
     const required = tripRequiredHotelNights(trip)
     const booked = trip.hotelNightsBooked ?? 0

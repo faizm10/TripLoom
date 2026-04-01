@@ -372,6 +372,7 @@ export function AgentPageContent() {
       destination,
       dateMode: "exact",
       travelers: travelers > 1 ? "group" : "solo",
+      travelScope: "international",
     })
 
     const budgetTotal = typeof session.draftTrip.budgetTotal === "number" ? Math.max(0, session.draftTrip.budgetTotal) : 0

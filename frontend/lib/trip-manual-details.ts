@@ -1,4 +1,5 @@
 import type { SavedFlightRow } from "@/lib/supabase-trip-flights"
+import type { SavedGroundTripRow } from "@/lib/supabase-trip-ground"
 import type { TripHotelStay } from "@/lib/supabase-trip-hotels"
 
 export function summarizeFlights(flights: SavedFlightRow[]): string | undefined {
@@ -12,6 +13,15 @@ export function summarizeFlights(flights: SavedFlightRow[]): string | undefined 
     return [flight.route, via, flight.date, flight.flightNumber].filter(Boolean).join(" · ")
   }
   return `${flights.length} flights logged`
+}
+
+export function summarizeGroundTrips(rows: SavedGroundTripRow[]): string | undefined {
+  if (rows.length === 0) return undefined
+  if (rows.length === 1) {
+    const r = rows[0]
+    return [r.route, r.date, r.operator, r.serviceNumber].filter(Boolean).join(" · ")
+  }
+  return `${rows.length} bus & train legs logged`
 }
 
 export function summarizeHotels(stays: TripHotelStay[]): string | undefined {

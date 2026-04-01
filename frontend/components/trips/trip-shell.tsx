@@ -5,7 +5,7 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { LogOutIcon, PanelRightCloseIcon, PanelRightOpenIcon } from "lucide-react"
 
-import { tripNavItems } from "@/components/trips/nav"
+import { getTripNavItemsForTrip } from "@/components/trips/nav"
 import { TripAiPanel } from "@/components/trips/trip-ai-panel"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -27,6 +27,8 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { createClient } from "@/lib/supabase/client"
+import { countryNameFromCode } from "@/lib/iso-countries"
+import { getUserProfileFromSupabase } from "@/lib/supabase-profile"
 import type { User } from "@supabase/supabase-js"
 import type { Trip } from "@/lib/trips"
 
@@ -44,6 +46,10 @@ const pageCopy: Record<string, { title: string; subtitle: string }> = {
   flights: {
     title: "Flights",
     subtitle: "Log your flight details in one place with a compact manual workspace.",
+  },
+  "buses-trains": {
+    title: "Buses & trains",
+    subtitle: "Log rail and bus legs for domestic travel alongside or instead of flights.",
   },
   hotels: {
     title: "Hotels",
@@ -89,6 +95,7 @@ export function TripShell({
   const [chatOpen, setChatOpen] = React.useState(false)
 
   const [user, setUser] = React.useState<User | null>(null)
+  const [residenceLabel, setResidenceLabel] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     const supabase = createClient()
@@ -99,6 +106,13 @@ export function TripShell({
     return () => subscription.unsubscribe()
   }, [])
 
+  React.useEffect(() => {
+    void getUserProfileFromSupabase().then((profile) => {
+      const name = countryNameFromCode(profile?.country_code)
+      setResidenceLabel(name)
+    })
+  }, [user?.id])
+
   const pageKey = getPageKey(pathname)
   const header = pageCopy[pageKey] || pageCopy.overview
   const pageDetails = [
@@ -106,7 +120,10 @@ export function TripShell({
     `dates=${trip.startDate} to ${trip.endDate}`,
     `travelers=${trip.travelers}`,
     `status=${trip.status}`,
-  ].join("; ")
+    residenceLabel ? `country_of_residence=${residenceLabel}` : "",
+  ]
+    .filter(Boolean)
+    .join("; ")
 
   return (
     <TripPageContext.Provider value={trip}>
@@ -131,7 +148,7 @@ export function TripShell({
             <SidebarGroupLabel>Trip Control Center</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
-                {tripNavItems.map((item) => {
+                {getTripNavItemsForTrip(trip).map((item) => {
                   const href = `/trips/${trip.id}${item.hrefSuffix}`
                   const active = pathname === href
                   return (
@@ -162,6 +179,11 @@ export function TripShell({
                 <div className="min-w-0">
                   <p className="truncate font-medium">{user?.user_metadata?.name || "Traveler"}</p>
                   <p className="text-muted-foreground truncate">{user?.email}</p>
+                  {residenceLabel ? (
+                    <p className="text-muted-foreground mt-0.5 truncate text-[10px]">
+                      Residence: {residenceLabel}
+                    </p>
+                  ) : null}
                 </div>
               </div>
               <Button 

@@ -162,7 +162,7 @@ export function TripShell({
                   return (
                     <SidebarMenuItem key={item.key}>
                       <SidebarMenuButton asChild isActive={active}>
-                        <Link href={href}>
+                        <Link href={href} prefetch={false}>
                           <item.icon />
                           <span>{item.label}</span>
                         </Link>

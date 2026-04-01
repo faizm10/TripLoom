@@ -59,9 +59,40 @@ export function TripLayoutClient({
   const ensureTripInStore = useEnsureTripInStore()
   const updateTrip = useUpdateTrip()
 
+  const serverTripRef = React.useRef(serverTrip)
+  serverTripRef.current = serverTrip
+
+  const serverTripHydrationKey = React.useMemo(
+    () =>
+      [
+        serverTrip.id,
+        serverTrip.destination,
+        serverTrip.startDate,
+        serverTrip.endDate,
+        serverTrip.timezone ?? "",
+        serverTrip.travelers,
+        serverTrip.isGroupTrip ? "1" : "0",
+        serverTrip.totalDays,
+        serverTrip.lastUpdated,
+        serverTrip.travelScope ?? "",
+      ].join("|"),
+    [
+      serverTrip.id,
+      serverTrip.destination,
+      serverTrip.startDate,
+      serverTrip.endDate,
+      serverTrip.timezone,
+      serverTrip.travelers,
+      serverTrip.isGroupTrip,
+      serverTrip.totalDays,
+      serverTrip.lastUpdated,
+      serverTrip.travelScope,
+    ]
+  )
+
   React.useLayoutEffect(() => {
-    ensureTripInStore(serverTrip)
-  }, [ensureTripInStore, serverTrip])
+    ensureTripInStore(serverTripRef.current)
+  }, [ensureTripInStore, serverTripHydrationKey])
 
   const liveTrip = useTrip(tripId, serverTrip) ?? serverTrip
   const liveTripRef = React.useRef(liveTrip)

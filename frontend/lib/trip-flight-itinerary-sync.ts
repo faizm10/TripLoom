@@ -74,7 +74,7 @@ function timeBlockFromDeparture(departure: string, legFallback: "outbound" | "in
 }
 
 function buildFlightAutoItem(trip: Trip, leg: "outbound" | "inbound", flight: SavedFlightRow): TripItineraryItem {
-  const now = new Date().toISOString()
+  const stableTs = `${flight.date.trim() || "1970-01-01"}T12:00:00.000Z`
   const dayIndex = dayIndexForTravelDate(trip, flight.date)
   const category = leg === "outbound" ? "outbound_flight" : "inbound_flight"
   const timeRange = travelLegTimesToLocalRange(
@@ -105,13 +105,13 @@ function buildFlightAutoItem(trip: Trip, leg: "outbound" | "inbound", flight: Sa
     startTimeLocal: timeRange?.startTimeLocal,
     endTimeLocal: timeRange?.endTimeLocal,
     sortOrder: leg === "outbound" ? 5 : 15,
-    createdAt: now,
-    updatedAt: now,
+    createdAt: stableTs,
+    updatedAt: stableTs,
   }
 }
 
 function buildGroundAutoItem(trip: Trip, leg: "outbound" | "inbound", row: SavedGroundTripRow): TripItineraryItem {
-  const now = new Date().toISOString()
+  const stableTs = `${row.date.trim() || "1970-01-01"}T12:00:00.000Z`
   const dayIndex = dayIndexForTravelDate(trip, row.date)
   const timeRange = travelLegTimesToLocalRange(row.date.trim(), row.departure, row.arrival)
   const timeBlock = timeBlockFromDeparture(row.departure, leg)
@@ -137,8 +137,8 @@ function buildGroundAutoItem(trip: Trip, leg: "outbound" | "inbound", row: Saved
     startTimeLocal: timeRange?.startTimeLocal,
     endTimeLocal: timeRange?.endTimeLocal,
     sortOrder: leg === "outbound" ? 6 : 16,
-    createdAt: now,
-    updatedAt: now,
+    createdAt: stableTs,
+    updatedAt: stableTs,
   }
 }
 

@@ -81,11 +81,33 @@ function serverOverviewMatches(client: Trip, fromServer: Trip): boolean {
   )
 }
 
+/** Patches from trip-layout transport → itinerary sync only; must not bump lastUpdated or SSR merge fights the client in a loop. */
+const TRANSPORT_ENRICHMENT_KEYS = new Set([
+  "selectedFlights",
+  "selectedGroundTransport",
+  "selectedHotel",
+  "flightSummary",
+  "groundTransportSummary",
+  "hotelSummary",
+  "hotelArea",
+  "hotelNightsBooked",
+  "itineraryItems",
+  "itineraryDaysPlanned",
+])
+
+function isTransportEnrichmentOnly(partial: Partial<Trip>): boolean {
+  const keys = Object.keys(partial)
+  if (keys.length === 0) return false
+  return keys.every((k) => TRANSPORT_ENRICHMENT_KEYS.has(k))
+}
+
 function applyTripPatch(trip: Trip, partial: Partial<Trip>): Trip {
   const merged: Trip = {
     ...trip,
     ...partial,
-    lastUpdated: new Date().toISOString().slice(0, 10),
+    lastUpdated: isTransportEnrichmentOnly(partial)
+      ? trip.lastUpdated
+      : new Date().toISOString().slice(0, 10),
   }
   if (partial.itineraryItems !== undefined) {
     merged.itineraryItems = coerceItinerary({

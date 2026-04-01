@@ -22,6 +22,11 @@ import {
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
+import {
+  createTripCollaboratorInviteAction,
+  createTripViewShareLinkAction,
+  getTripMemberRoleAction,
+} from "@/lib/actions/trip-share-actions"
 import type { Trip } from "@/lib/trips"
 import { getDateRangeLabel, getMissingChecklist, getNextStep, getTripTravelScope } from "@/lib/trips"
 
@@ -48,6 +53,9 @@ function OverviewPageBody({ trip }: { trip: Trip }) {
   const nextStep = getNextStep(trip)
   const missing = getMissingChecklist(trip)
   const [mounted, setMounted] = React.useState(false)
+  const [myRole, setMyRole] = React.useState<"owner" | "editor" | "viewer" | null>(null)
+  const [shareBusy, setShareBusy] = React.useState(false)
+  const [inviteBusy, setInviteBusy] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
   const [destinationDraft, setDestinationDraft] = React.useState(trip.destination)
   const [startDateDraft, setStartDateDraft] = React.useState(trip.startDate)
@@ -55,6 +63,16 @@ function OverviewPageBody({ trip }: { trip: Trip }) {
   const [travelersDraft, setTravelersDraft] = React.useState(String(trip.travelers))
 
   React.useEffect(() => setMounted(true), [])
+
+  React.useEffect(() => {
+    let cancelled = false
+    void getTripMemberRoleAction(trip.id).then((role) => {
+      if (!cancelled) setMyRole(role)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [trip.id])
 
   React.useEffect(() => {
     if (!editOpen) return
@@ -100,6 +118,56 @@ function OverviewPageBody({ trip }: { trip: Trip }) {
     })
     toast.success("Trip details updated.")
     setEditOpen(false)
+  }
+
+  const fullUrl = (path: string) =>
+    typeof window !== "undefined" ? `${window.location.origin}${path}` : path
+
+  const handleShareLink = async () => {
+    if (myRole !== "owner") {
+      toast.message("Only the trip owner can create a view-only link.", {
+        description: `Ask the owner to share, or open Group if you own this trip.`,
+      })
+      return
+    }
+    setShareBusy(true)
+    try {
+      const { sharePath } = await createTripViewShareLinkAction(trip.id, { expiresInDays: null })
+      const url = fullUrl(sharePath)
+      await navigator.clipboard.writeText(url)
+      toast.success("View-only link copied", {
+        description: "Anyone with the link can view this trip without signing in.",
+      })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not create share link.")
+    } finally {
+      setShareBusy(false)
+    }
+  }
+
+  const handleInviteLink = async () => {
+    if (myRole !== "owner") {
+      toast.message("Only the trip owner can create a collaborator invite.", {
+        description: `Ask the owner to invite you, or open Group if you own this trip.`,
+      })
+      return
+    }
+    setInviteBusy(true)
+    try {
+      const { invitePath } = await createTripCollaboratorInviteAction(trip.id, {
+        role: "editor",
+        expiresInDays: 14,
+      })
+      const url = fullUrl(invitePath)
+      await navigator.clipboard.writeText(url)
+      toast.success("Collaborator invite copied", {
+        description: "Recipients sign in and accept to edit this trip with you.",
+      })
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not create invite.")
+    } finally {
+      setInviteBusy(false)
+    }
   }
 
   return (
@@ -176,11 +244,37 @@ function OverviewPageBody({ trip }: { trip: Trip }) {
               ) : (
                 <Button variant="outline" size="sm">Edit Trip</Button>
               )}
-              <Button variant="outline" size="sm">
-                <Share2Icon /> Share
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={shareBusy || myRole === null}
+                title={
+                  myRole !== "owner"
+                    ? "Only the trip owner can create a view-only link"
+                    : "Create a read-only link (no sign-in required)"
+                }
+                onClick={() => void handleShareLink()}
+                className="touch-manipulation gap-1.5"
+              >
+                <Share2Icon className="size-3.5" />
+                {shareBusy ? "…" : "Share"}
               </Button>
-              <Button variant="outline" size="sm">
-                <UserPlusIcon /> Invite
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={inviteBusy || myRole === null}
+                title={
+                  myRole !== "owner"
+                    ? "Only the trip owner can invite collaborators"
+                    : "Create an invite link for editors (sign-in required)"
+                }
+                onClick={() => void handleInviteLink()}
+                className="touch-manipulation gap-1.5"
+              >
+                <UserPlusIcon className="size-3.5" />
+                {inviteBusy ? "…" : "Invite"}
               </Button>
             </div>
           </div>

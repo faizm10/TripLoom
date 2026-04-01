@@ -2,16 +2,19 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { motion } from "framer-motion"
 import { CheckCircle2Icon, EyeIcon, EyeOffIcon, UserPlusIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createClient } from "@/lib/supabase/client"
+import { safeAuthRedirectPath } from "@/lib/auth-redirect"
 
-export default function SignupPage() {
+function SignupForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const afterSignup = safeAuthRedirectPath(searchParams.get("redirect"))
   const [email, setEmail] = React.useState("")
   const [password, setPassword] = React.useState("")
   const [confirm, setConfirm] = React.useState("")
@@ -36,11 +39,12 @@ export default function SignupPage() {
 
     setLoading(true)
     const supabase = createClient()
+    const next = encodeURIComponent(afterSignup)
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: `${window.location.origin}/auth/callback?next=${next}`,
       },
     })
 
@@ -52,7 +56,7 @@ export default function SignupPage() {
 
     if (data.session) {
       // Email confirmation disabled — Supabase returned a live session
-      router.push("/dashboard")
+      router.push(afterSignup)
       router.refresh()
       return
     }
@@ -66,9 +70,12 @@ export default function SignupPage() {
     setOauthLoading(true)
     setError(null)
     const supabase = createClient()
+    const next = encodeURIComponent(afterSignup)
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${window.location.origin}/auth/callback` },
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=${next}`,
+      },
     })
     if (error) {
       setError(error.message)
@@ -266,5 +273,19 @@ export default function SignupPage() {
         </p>
       </motion.div>
     </div>
+  )
+}
+
+export default function SignupPage() {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center">
+          <span className="text-muted-foreground text-sm">Loading…</span>
+        </div>
+      }
+    >
+      <SignupForm />
+    </React.Suspense>
   )
 }

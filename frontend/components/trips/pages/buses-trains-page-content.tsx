@@ -25,6 +25,12 @@ import { itineraryWithTransportSummary } from "@/lib/trip-flight-itinerary-sync"
 import { summarizeFlights, summarizeGroundTrips } from "@/lib/trip-manual-details"
 import type { Trip } from "@/lib/trips"
 import { getTripTravelScope } from "@/lib/trips"
+import {
+  coerceToCanonicalTime12h,
+  formatTime12hForDisplay,
+  isCanonicalTime12h,
+} from "@/lib/time-12h"
+import { Time12hFields } from "@/components/trips/time-12h-fields"
 
 const LEG_OPTIONS: Array<{ value: GroundLegType; label: string }> = [
   { value: "outbound", label: "Outbound" },
@@ -52,7 +58,7 @@ function createEmptyGroundForm(trip: Trip): GroundFormState {
 
 function sortGround(rows: SavedGroundTripRow[]): SavedGroundTripRow[] {
   return [...rows].sort((a, b) => {
-    const dateCmp = (b.date || "").localeCompare(a.date || "")
+    const dateCmp = (a.date || "").localeCompare(b.date || "")
     if (dateCmp !== 0) return dateCmp
     return a.route.localeCompare(b.route)
   })
@@ -87,25 +93,28 @@ function BusesTrainsPageBody({ trip }: { trip: Trip }) {
   const [loading, setLoading] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
 
-  const syncTrip = React.useCallback(
-    async (nextGround: SavedGroundTripRow[]) => {
-      const flights = await getTripFlightsFromSupabase(trip.id)
-      const { itineraryItems, itineraryDaysPlanned } = itineraryWithTransportSummary(
-        trip,
-        flights,
-        nextGround
-      )
-      updateTrip(trip.id, {
-        selectedFlights: flights.length > 0,
-        selectedGroundTransport: nextGround.length > 0,
-        flightSummary: summarizeFlights(flights),
-        groundTransportSummary: summarizeGroundTrips(nextGround),
-        itineraryItems,
-        itineraryDaysPlanned,
-      })
-    },
-    [trip, updateTrip]
-  )
+  const tripRef = React.useRef(trip)
+  React.useEffect(() => {
+    tripRef.current = trip
+  }, [trip])
+
+  const syncTrip = React.useCallback(async (nextGround: SavedGroundTripRow[]) => {
+    const t = tripRef.current
+    const flights = await getTripFlightsFromSupabase(t.id)
+    const { itineraryItems, itineraryDaysPlanned } = itineraryWithTransportSummary(
+      t,
+      flights,
+      nextGround
+    )
+    updateTrip(t.id, {
+      selectedFlights: flights.length > 0,
+      selectedGroundTransport: nextGround.length > 0,
+      flightSummary: summarizeFlights(flights),
+      groundTransportSummary: summarizeGroundTrips(nextGround),
+      itineraryItems,
+      itineraryDaysPlanned,
+    })
+  }, [updateTrip])
 
   React.useEffect(() => {
     let cancelled = false
@@ -125,11 +134,15 @@ function BusesTrainsPageBody({ trip }: { trip: Trip }) {
     }
   }, [trip.id, syncTrip])
 
+  const prevEditingIdRef = React.useRef<string | null>(editingId)
   React.useEffect(() => {
-    if (!editingId) {
-      setForm(createEmptyGroundForm(trip))
+    const wasEditing = prevEditingIdRef.current != null
+    const nowEditing = editingId != null
+    if (wasEditing && !nowEditing) {
+      setForm(createEmptyGroundForm(tripRef.current))
     }
-  }, [editingId, trip])
+    prevEditingIdRef.current = editingId
+  }, [editingId])
 
   const updateForm = <K extends keyof GroundFormState>(key: K, value: GroundFormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -137,7 +150,7 @@ function BusesTrainsPageBody({ trip }: { trip: Trip }) {
 
   const resetForm = () => {
     setEditingId(null)
-    setForm(createEmptyGroundForm(trip))
+    setForm(createEmptyGroundForm(tripRef.current))
   }
 
   const handleSave = async () => {
@@ -150,13 +163,24 @@ function BusesTrainsPageBody({ trip }: { trip: Trip }) {
       return
     }
 
+    const departure = form.departure.trim()
+    const arrival = form.arrival.trim()
+    if (departure && !isCanonicalTime12h(departure)) {
+      toast.error("Departure time is incomplete. Choose hour, minute, and AM or PM.")
+      return
+    }
+    if (arrival && !isCanonicalTime12h(arrival)) {
+      toast.error("Arrival time is incomplete. Choose hour, minute, and AM or PM.")
+      return
+    }
+
     const nextEntry: SavedGroundTripRow = {
       id: editingId ?? `${trip.id}:ground:${Date.now()}`,
       source: form.source,
       route: form.route.trim(),
       date: form.date.trim(),
-      departure: form.departure.trim(),
-      arrival: form.arrival.trim(),
+      departure,
+      arrival,
       duration: form.duration.trim(),
       operator: form.operator.trim(),
       serviceNumber: form.serviceNumber.trim().toUpperCase(),
@@ -189,8 +213,8 @@ function BusesTrainsPageBody({ trip }: { trip: Trip }) {
       source: entry.source,
       route: entry.route,
       date: entry.date,
-      departure: entry.departure,
-      arrival: entry.arrival,
+      departure: coerceToCanonicalTime12h(entry.departure),
+      arrival: coerceToCanonicalTime12h(entry.arrival),
       duration: entry.duration,
       operator: entry.operator,
       serviceNumber: entry.serviceNumber,
@@ -300,24 +324,20 @@ function BusesTrainsPageBody({ trip }: { trip: Trip }) {
               placeholder="CAD 89"
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="ground-dep">Departure time</Label>
-            <Input
-              id="ground-dep"
-              value={form.departure}
-              onChange={(e) => updateForm("departure", e.target.value)}
-              placeholder="08:30"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="ground-arr">Arrival time</Label>
-            <Input
-              id="ground-arr"
-              value={form.arrival}
-              onChange={(e) => updateForm("arrival", e.target.value)}
-              placeholder="14:05"
-            />
-          </div>
+          <Time12hFields
+            id="ground-departure"
+            label="Departure time"
+            value={form.departure}
+            onChange={(v) => updateForm("departure", v)}
+            disabled={saving}
+          />
+          <Time12hFields
+            id="ground-arrival"
+            label="Arrival time"
+            value={form.arrival}
+            onChange={(v) => updateForm("arrival", v)}
+            disabled={saving}
+          />
           <div className="space-y-2">
             <Label htmlFor="ground-duration">Duration</Label>
             <Input
@@ -396,11 +416,15 @@ function BusesTrainsPageBody({ trip }: { trip: Trip }) {
                   <div className="grid gap-3 text-sm text-muted-foreground sm:grid-cols-3">
                     <div>
                       <p className="text-xs uppercase tracking-wide">Departure</p>
-                      <p className="mt-1 text-foreground">{entry.departure || "—"}</p>
+                      <p className="mt-1 font-mono text-foreground">
+                        {formatTime12hForDisplay(entry.departure)}
+                      </p>
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-wide">Arrival</p>
-                      <p className="mt-1 text-foreground">{entry.arrival || "—"}</p>
+                      <p className="mt-1 font-mono text-foreground">
+                        {formatTime12hForDisplay(entry.arrival)}
+                      </p>
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-wide">Duration</p>

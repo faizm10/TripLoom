@@ -26,6 +26,12 @@ import { itineraryWithTransportSummary } from "@/lib/trip-flight-itinerary-sync"
 import { summarizeFlights, summarizeGroundTrips } from "@/lib/trip-manual-details"
 import type { Trip } from "@/lib/trips"
 import { getTripTravelScope } from "@/lib/trips"
+import {
+  coerceToCanonicalTime12h,
+  formatTime12hForDisplay,
+  isCanonicalTime12h,
+} from "@/lib/time-12h"
+import { Time12hFields } from "@/components/trips/time-12h-fields"
 
 const LEG_OPTIONS: Array<{ value: FlightLegType; label: string }> = [
   { value: "outbound", label: "Outbound" },
@@ -90,28 +96,31 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
   const [loading, setLoading] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
 
-  const syncTrip = React.useCallback(
-    async (nextEntries: SavedFlightRow[]) => {
-      const ground =
-        getTripTravelScope(trip) === "domestic"
-          ? await getTripGroundTripsFromSupabase(trip.id)
-          : []
-      const { itineraryItems, itineraryDaysPlanned } = itineraryWithTransportSummary(
-        trip,
-        nextEntries,
-        ground
-      )
-      updateTrip(trip.id, {
-        selectedFlights: nextEntries.length > 0,
-        selectedGroundTransport: ground.length > 0,
-        flightSummary: summarizeFlights(nextEntries),
-        groundTransportSummary: summarizeGroundTrips(ground),
-        itineraryItems,
-        itineraryDaysPlanned,
-      })
-    },
-    [trip, updateTrip]
-  )
+  const tripRef = React.useRef(trip)
+  React.useEffect(() => {
+    tripRef.current = trip
+  }, [trip])
+
+  const syncTrip = React.useCallback(async (nextEntries: SavedFlightRow[]) => {
+    const t = tripRef.current
+    const ground =
+      getTripTravelScope(t) === "domestic"
+        ? await getTripGroundTripsFromSupabase(t.id)
+        : []
+    const { itineraryItems, itineraryDaysPlanned } = itineraryWithTransportSummary(
+      t,
+      nextEntries,
+      ground
+    )
+    updateTrip(t.id, {
+      selectedFlights: nextEntries.length > 0,
+      selectedGroundTransport: ground.length > 0,
+      flightSummary: summarizeFlights(nextEntries),
+      groundTransportSummary: summarizeGroundTrips(ground),
+      itineraryItems,
+      itineraryDaysPlanned,
+    })
+  }, [updateTrip])
 
   React.useEffect(() => {
     let cancelled = false
@@ -132,11 +141,15 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
     }
   }, [trip.id, syncTrip])
 
+  const prevEditingIdRef = React.useRef<string | null>(editingId)
   React.useEffect(() => {
-    if (!editingId) {
-      setForm(createEmptyFlightForm(trip))
+    const wasEditing = prevEditingIdRef.current != null
+    const nowEditing = editingId != null
+    if (wasEditing && !nowEditing) {
+      setForm(createEmptyFlightForm(tripRef.current))
     }
-  }, [editingId, trip])
+    prevEditingIdRef.current = editingId
+  }, [editingId])
 
   const updateForm = <K extends keyof FlightFormState>(key: K, value: FlightFormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -167,7 +180,7 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
 
   const resetForm = () => {
     setEditingId(null)
-    setForm(createEmptyFlightForm(trip))
+    setForm(createEmptyFlightForm(tripRef.current))
   }
 
   const handleSave = async () => {
@@ -177,6 +190,17 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
     }
     if (!form.date.trim()) {
       toast.error("Flight date is required.")
+      return
+    }
+
+    const departure = form.departure.trim()
+    const arrival = form.arrival.trim()
+    if (departure && !isCanonicalTime12h(departure)) {
+      toast.error("Departure time is incomplete. Choose hour, minute, and AM or PM.")
+      return
+    }
+    if (arrival && !isCanonicalTime12h(arrival)) {
+      toast.error("Arrival time is incomplete. Choose hour, minute, and AM or PM.")
       return
     }
 
@@ -192,8 +216,8 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
       source: form.source,
       route: form.route.trim(),
       date: form.date.trim(),
-      departure: form.departure.trim(),
-      arrival: form.arrival.trim(),
+      departure,
+      arrival,
       duration: form.duration.trim(),
       stops: normalizedStopDetails.length > 0 ? summarizeStops(normalizedStopDetails) : form.stops.trim() || "Non-stop",
       airline: form.airline.trim(),
@@ -228,8 +252,8 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
       source: entry.source,
       route: entry.route,
       date: entry.date,
-      departure: entry.departure,
-      arrival: entry.arrival,
+      departure: coerceToCanonicalTime12h(entry.departure),
+      arrival: coerceToCanonicalTime12h(entry.arrival),
       duration: entry.duration,
       stops: entry.stops,
       airline: entry.airline,
@@ -343,24 +367,20 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
               placeholder="CAD 842"
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="flight-departure">Departure time</Label>
-            <Input
-              id="flight-departure"
-              value={form.departure}
-              onChange={(event) => updateForm("departure", event.target.value)}
-              placeholder="18:40"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="flight-arrival">Arrival time</Label>
-            <Input
-              id="flight-arrival"
-              value={form.arrival}
-              onChange={(event) => updateForm("arrival", event.target.value)}
-              placeholder="06:20"
-            />
-          </div>
+          <Time12hFields
+            id="flight-departure"
+            label="Departure time"
+            value={form.departure}
+            onChange={(v) => updateForm("departure", v)}
+            disabled={saving}
+          />
+          <Time12hFields
+            id="flight-arrival"
+            label="Arrival time"
+            value={form.arrival}
+            onChange={(v) => updateForm("arrival", v)}
+            disabled={saving}
+          />
           <div className="space-y-2">
             <Label htmlFor="flight-duration">Duration</Label>
             <Input
@@ -510,11 +530,15 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
                   <div className="grid gap-3 text-sm text-muted-foreground sm:grid-cols-2 xl:grid-cols-4">
                     <div>
                       <p className="text-xs uppercase tracking-wide">Departure</p>
-                      <p className="mt-1 text-foreground">{entry.departure || "—"}</p>
+                      <p className="mt-1 font-mono text-foreground">
+                        {formatTime12hForDisplay(entry.departure)}
+                      </p>
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-wide">Arrival</p>
-                      <p className="mt-1 text-foreground">{entry.arrival || "—"}</p>
+                      <p className="mt-1 font-mono text-foreground">
+                        {formatTime12hForDisplay(entry.arrival)}
+                      </p>
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-wide">Duration</p>

@@ -1,5 +1,10 @@
 import type { SavedFlightRow } from "@/lib/supabase-trip-flights"
 import type { SavedGroundTripRow } from "@/lib/supabase-trip-ground"
+import {
+  parseFlexibleTime12h,
+  time12hPartsTo24h,
+  travelLegTimesToLocalRange,
+} from "@/lib/time-12h"
 import type { ItineraryTimeBlock, Trip, TripItineraryItem } from "@/lib/trips"
 import { computeItineraryDaysPlanned, getTripItineraryItems } from "@/lib/trips"
 
@@ -57,11 +62,27 @@ function pickInboundGround(ground: SavedGroundTripRow[]): SavedGroundTripRow | u
   return [...pool].sort((a, b) => (b.date || "").localeCompare(a.date || ""))[0]
 }
 
+function timeBlockFromDeparture(departure: string, legFallback: "outbound" | "inbound"): ItineraryTimeBlock {
+  const dep = parseFlexibleTime12h(departure)
+  if (!dep) {
+    return legFallback === "outbound" ? "morning" : "evening"
+  }
+  const { hour } = time12hPartsTo24h(dep)
+  if (hour < 12) return "morning"
+  if (hour < 17) return "afternoon"
+  return "evening"
+}
+
 function buildFlightAutoItem(trip: Trip, leg: "outbound" | "inbound", flight: SavedFlightRow): TripItineraryItem {
   const now = new Date().toISOString()
   const dayIndex = dayIndexForTravelDate(trip, flight.date)
-  const timeBlock: ItineraryTimeBlock = leg === "outbound" ? "morning" : "evening"
   const category = leg === "outbound" ? "outbound_flight" : "inbound_flight"
+  const timeRange = travelLegTimesToLocalRange(
+    flight.date.trim(),
+    flight.departure,
+    flight.arrival
+  )
+  const timeBlock = timeBlockFromDeparture(flight.departure, leg)
   const route = flight.route.trim()
   const fn = flight.flightNumber.trim()
   const title =
@@ -81,6 +102,8 @@ function buildFlightAutoItem(trip: Trip, leg: "outbound" | "inbound", flight: Sa
     title,
     locationLabel: route || (leg === "outbound" ? "Departure" : "Return"),
     notes,
+    startTimeLocal: timeRange?.startTimeLocal,
+    endTimeLocal: timeRange?.endTimeLocal,
     sortOrder: leg === "outbound" ? 5 : 15,
     createdAt: now,
     updatedAt: now,
@@ -90,7 +113,8 @@ function buildFlightAutoItem(trip: Trip, leg: "outbound" | "inbound", flight: Sa
 function buildGroundAutoItem(trip: Trip, leg: "outbound" | "inbound", row: SavedGroundTripRow): TripItineraryItem {
   const now = new Date().toISOString()
   const dayIndex = dayIndexForTravelDate(trip, row.date)
-  const timeBlock: ItineraryTimeBlock = leg === "outbound" ? "morning" : "evening"
+  const timeRange = travelLegTimesToLocalRange(row.date.trim(), row.departure, row.arrival)
+  const timeBlock = timeBlockFromDeparture(row.departure, leg)
   const route = row.route.trim()
   const svc = row.serviceNumber.trim()
   const title =
@@ -110,6 +134,8 @@ function buildGroundAutoItem(trip: Trip, leg: "outbound" | "inbound", row: Saved
     title,
     locationLabel: route || (leg === "outbound" ? "Departure" : "Return"),
     notes,
+    startTimeLocal: timeRange?.startTimeLocal,
+    endTimeLocal: timeRange?.endTimeLocal,
     sortOrder: leg === "outbound" ? 6 : 16,
     createdAt: now,
     updatedAt: now,

@@ -202,7 +202,7 @@ export function DestinationSearch({
           <div ref={listRef} className="py-1">
             {list.map((suggestion, index) => (
               <button
-                key={suggestion.id}
+                key={`${suggestion.type}-${suggestion.id}-${index}`}
                 type="button"
                 role="option"
                 id={`destination-option-${index}`}

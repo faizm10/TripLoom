@@ -30,7 +30,9 @@ import {
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { createTripBufferedWeekView } from "@/components/trips/trip-buffered-week-view"
 import { buildGoogleExportBatch } from "@/lib/calendar-export"
+import { tripCalendarBufferedDayCount, tripCalendarBufferFirstDay } from "@/lib/trip-calendar-buffer"
 import type {
   ItineraryCategory,
   ItineraryStatus,
@@ -276,6 +278,33 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
       setCalendarView(Views.DAY)
     }
   }, [calendarView, isMobile])
+
+  const tripBufferedWeekView = React.useMemo(
+    () => createTripBufferedWeekView(trip),
+    [trip.id, trip.startDate, trip.endDate]
+  )
+
+  const calendarViews = React.useMemo(() => {
+    if (isMobile) {
+      return { day: true, agenda: true }
+    }
+    return {
+      month: true,
+      week: tripBufferedWeekView,
+      day: true,
+      agenda: true,
+    }
+  }, [isMobile, tripBufferedWeekView])
+
+  const agendaDaySpan = React.useMemo(
+    () => tripCalendarBufferedDayCount(trip),
+    [trip.id, trip.startDate, trip.endDate]
+  )
+
+  const calendarDefaultDate = React.useMemo(
+    () => tripCalendarBufferFirstDay(trip),
+    [trip.id, trip.startDate, trip.endDate]
+  )
 
   const syncQueryState = React.useCallback(
     (nextView: View, nextStatus: StatusFilter) => {
@@ -689,8 +718,10 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
                 events={calendarEvents}
                 view={calendarView}
                 onView={handleCalendarViewChange}
-                views={isMobile ? [Views.DAY, Views.AGENDA] : [Views.MONTH, Views.WEEK, Views.DAY, Views.AGENDA]}
-                defaultDate={dateForTripDay(trip.startDate, 1)}
+                views={calendarViews as React.ComponentProps<typeof Calendar>["views"]}
+                defaultDate={calendarDefaultDate}
+                length={agendaDaySpan}
+                showMultiDayTimes
                 startAccessor="start"
                 endAccessor="end"
                 style={{ height: isMobile ? 520 : 780 }}
@@ -706,8 +737,10 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
                 events={calendarEvents}
                 view={calendarView}
                 onView={handleCalendarViewChange}
-                views={isMobile ? [Views.DAY, Views.AGENDA] : [Views.MONTH, Views.WEEK, Views.DAY, Views.AGENDA]}
-                defaultDate={dateForTripDay(trip.startDate, 1)}
+                views={calendarViews as React.ComponentProps<typeof Calendar>["views"]}
+                defaultDate={calendarDefaultDate}
+                length={agendaDaySpan}
+                showMultiDayTimes
                 startAccessor="start"
                 endAccessor="end"
                 style={{ height: isMobile ? 520 : 780 }}

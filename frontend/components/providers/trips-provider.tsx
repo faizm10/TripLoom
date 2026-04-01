@@ -38,6 +38,47 @@ function normalizeTransit(trip: Trip): Trip {
   }
 }
 
+/** Overlay Supabase-backed overview fields; keep client-enriched state (itinerary, flights, finance, etc.). */
+function mergePersistedTripOverview(client: Trip, fromServer: Trip): Trip {
+  const totalDaysChanged = client.totalDays !== fromServer.totalDays
+  let merged: Trip = {
+    ...client,
+    destination: fromServer.destination,
+    startDate: fromServer.startDate,
+    endDate: fromServer.endDate,
+    timezone: fromServer.timezone,
+    travelers: fromServer.travelers,
+    isGroupTrip: fromServer.isGroupTrip,
+    totalDays: fromServer.totalDays,
+    lastUpdated: fromServer.lastUpdated,
+  }
+  if (totalDaysChanged && Array.isArray(merged.itineraryItems) && merged.itineraryItems.length > 0) {
+    const items = coerceItinerary({
+      ...merged,
+      itineraryItems: merged.itineraryItems,
+    })
+    merged = {
+      ...merged,
+      itineraryItems: items,
+      itineraryDaysPlanned: computeDaysPlanned(items),
+    }
+  }
+  return normalizeTransit(merged)
+}
+
+function serverOverviewMatches(client: Trip, fromServer: Trip): boolean {
+  return (
+    client.destination === fromServer.destination &&
+    client.startDate === fromServer.startDate &&
+    client.endDate === fromServer.endDate &&
+    (client.timezone ?? "") === (fromServer.timezone ?? "") &&
+    client.travelers === fromServer.travelers &&
+    client.isGroupTrip === fromServer.isGroupTrip &&
+    client.totalDays === fromServer.totalDays &&
+    client.lastUpdated === fromServer.lastUpdated
+  )
+}
+
 function applyTripPatch(trip: Trip, partial: Partial<Trip>): Trip {
   const merged: Trip = {
     ...trip,
@@ -104,7 +145,18 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
     getTripsFromSupabase()
       .then((list) => {
         if (gen !== fetchGenerationRef.current) return
-        setTrips(list.map(normalizeTransit))
+        setTrips((prev) => {
+          const prevById = new Map(prev.map((t) => [t.id, t]))
+          return list.map((row) => {
+            const serverTrip = normalizeTransit(row)
+            const existing = prevById.get(serverTrip.id)
+            if (existing) {
+              prevById.delete(serverTrip.id)
+              return mergePersistedTripOverview(existing, serverTrip)
+            }
+            return serverTrip
+          })
+        })
       })
       .catch(() => {
         if (gen !== fetchGenerationRef.current) return
@@ -200,8 +252,17 @@ export function TripsProvider({ children }: { children: React.ReactNode }) {
 
   const ensureTripInStore = React.useCallback((trip: Trip) => {
     setTrips((prev) => {
-      if (prev.some((t) => t.id === trip.id)) return prev
-      return [normalizeTransit(trip), ...prev]
+      const idx = prev.findIndex((t) => t.id === trip.id)
+      const serverTrip = normalizeTransit(trip)
+      if (idx === -1) {
+        return [serverTrip, ...prev]
+      }
+      const current = prev[idx]
+      if (serverOverviewMatches(current, serverTrip)) {
+        return prev
+      }
+      const merged = mergePersistedTripOverview(current, serverTrip)
+      return prev.map((t, i) => (i === idx ? merged : t))
     })
   }, [])
 

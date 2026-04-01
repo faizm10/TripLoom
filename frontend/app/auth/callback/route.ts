@@ -1,15 +1,30 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { createServerClient } from "@supabase/ssr"
 
+function redirectSameHost(request: NextRequest, pathname: string): NextResponse {
+  const url = request.nextUrl.clone()
+  url.pathname = pathname
+  url.search = ""
+  return NextResponse.redirect(url)
+}
+
+function redirectLoginFailed(request: NextRequest): NextResponse {
+  const url = request.nextUrl.clone()
+  url.pathname = "/auth/login"
+  url.search = ""
+  url.searchParams.set("error", "auth_callback_failed")
+  return NextResponse.redirect(url)
+}
+
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url)
+  const { searchParams } = request.nextUrl
   const code = searchParams.get("code")
   const nextRaw = searchParams.get("next") ?? "/dashboard"
   const next =
     nextRaw.startsWith("/") && !nextRaw.startsWith("//") ? nextRaw : "/dashboard"
 
   if (code) {
-    const supabaseResponse = NextResponse.redirect(`${origin}${next}`)
+    const supabaseResponse = redirectSameHost(request, next)
 
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -32,6 +47,5 @@ export async function GET(request: NextRequest) {
     if (!error) return supabaseResponse
   }
 
-  // Return to login with error if something went wrong
-  return NextResponse.redirect(`${origin}/auth/login?error=auth_callback_failed`)
+  return redirectLoginFailed(request)
 }

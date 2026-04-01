@@ -21,12 +21,24 @@ export function toPublicAbsoluteUrl(path: string): string {
 }
 
 /**
- * Supabase OAuth must redirect back to the same host as the tab (localhost vs production).
- * If `redirectTo` used `NEXT_PUBLIC_SITE_URL` while you develop on localhost, Google would
- * send the auth `code` to prod or Supabase would fall back to Site URL (`/` + `?code=`), and
- * the session would never exchange on your dev server.
+ * Origin for Supabase OAuth `redirectTo`. Must match an entry in Supabase → Auth → Redirect URLs.
+ *
+ * - Local dev on `localhost`: always use the tab origin (even if `NEXT_PUBLIC_SITE_URL` points at prod).
+ * - Production tab whose host matches `NEXT_PUBLIC_SITE_URL`: use that env value (canonical scheme/host).
+ * - Otherwise use the tab origin (preview deploys, alternate domains).
  */
 export function getOAuthCallbackOrigin(): string {
   if (typeof window === "undefined") return ""
-  return window.location.origin
+  const tab = window.location.origin
+  const env = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "")
+  if (!env) return tab
+  try {
+    const envUrl = new URL(env)
+    if (envUrl.host === window.location.host) {
+      return envUrl.origin
+    }
+  } catch {
+    /* invalid NEXT_PUBLIC_SITE_URL */
+  }
+  return tab
 }

@@ -36,6 +36,7 @@ import {
   type TripCollaboratorInviteSummary,
   type TripShareLinkSummary,
 } from "@/lib/actions/trip-share-actions"
+import { toPublicAbsoluteUrl } from "@/lib/public-site-url"
 
 function shortUserId(userId: string): string {
   return userId.length > 10 ? `${userId.slice(0, 6)}…${userId.slice(-4)}` : userId
@@ -110,11 +111,6 @@ export function GroupPageContent() {
     }
   }, [tripId])
 
-  function fullUrl(path: string): string {
-    if (typeof window === "undefined") return path
-    return `${window.location.origin}${path}`
-  }
-
   async function copyText(label: string, text: string) {
     try {
       await navigator.clipboard.writeText(text)
@@ -129,7 +125,7 @@ export function GroupPageContent() {
     setCreatingView(true)
     try {
       const { sharePath } = await createTripViewShareLinkAction(tripId, { expiresInDays: null })
-      const url = fullUrl(sharePath)
+      const url = toPublicAbsoluteUrl(sharePath)
       setLastViewUrl(url)
       setViewLinks(await listTripShareLinksAction(tripId))
       await copyText("View link", url)
@@ -148,7 +144,7 @@ export function GroupPageContent() {
         role: "editor",
         expiresInDays: 14,
       })
-      const url = fullUrl(invitePath)
+      const url = toPublicAbsoluteUrl(invitePath)
       setLastCollabUrl(url)
       setInvites(await listTripCollaboratorInvitesAction(tripId))
       await copyText("Invite link", url)

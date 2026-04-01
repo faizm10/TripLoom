@@ -27,6 +27,7 @@ import {
   createTripViewShareLinkAction,
   getTripMemberRoleAction,
 } from "@/lib/actions/trip-share-actions"
+import { toPublicAbsoluteUrl } from "@/lib/public-site-url"
 import type { Trip } from "@/lib/trips"
 import { getDateRangeLabel, getMissingChecklist, getNextStep, getTripTravelScope } from "@/lib/trips"
 
@@ -120,9 +121,6 @@ function OverviewPageBody({ trip }: { trip: Trip }) {
     setEditOpen(false)
   }
 
-  const fullUrl = (path: string) =>
-    typeof window !== "undefined" ? `${window.location.origin}${path}` : path
-
   const handleShareLink = async () => {
     if (myRole !== "owner") {
       toast.message("Only the trip owner can create a view-only link.", {
@@ -133,7 +131,7 @@ function OverviewPageBody({ trip }: { trip: Trip }) {
     setShareBusy(true)
     try {
       const { sharePath } = await createTripViewShareLinkAction(trip.id, { expiresInDays: null })
-      const url = fullUrl(sharePath)
+      const url = toPublicAbsoluteUrl(sharePath)
       await navigator.clipboard.writeText(url)
       toast.success("View-only link copied", {
         description: "Anyone with the link can view this trip without signing in.",
@@ -158,7 +156,7 @@ function OverviewPageBody({ trip }: { trip: Trip }) {
         role: "editor",
         expiresInDays: 14,
       })
-      const url = fullUrl(invitePath)
+      const url = toPublicAbsoluteUrl(invitePath)
       await navigator.clipboard.writeText(url)
       toast.success("Collaborator invite copied", {
         description: "Recipients sign in and accept to edit this trip with you.",

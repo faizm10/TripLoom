@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createClient } from "@/lib/supabase/client"
 import { safeAuthRedirectPath } from "@/lib/auth-redirect"
+import { getPublicSiteOrigin } from "@/lib/public-site-url"
 
 function LoginForm() {
   const router = useRouter()
@@ -52,7 +53,7 @@ function LoginForm() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback?next=${next}`,
+        redirectTo: `${getPublicSiteOrigin()}/auth/callback?next=${next}`,
       },
     })
     if (error) {

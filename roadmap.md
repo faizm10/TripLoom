@@ -36,6 +36,7 @@ Build an all-in-one travel platform for first-time travelers that plans, books, 
 - **AI assistant:** “plan it for me”, add bookings, explain options
 - **Finance layer:** multi-currency totals, group split ledger, budget timeline, FX alerts
 - **Group travel:** shared itineraries, approvals, split payments, group limits handling
+- **Packing lists:** personal checklist per trip; shared group list on group trips; synced checkboxes and labels
 
 ## Feature Breakdown (What Each Should Include)
 ### Flight Search & Booking (SerpAPI Google Flights)
@@ -91,6 +92,11 @@ Build an all-in-one travel platform for first-time travelers that plans, books, 
 - Split bookings (when >9 passengers)
 - Role permissions (owner/editor/viewer)
 
+### Packing Lists
+- Personal list (always) + group list (group trips only)
+- Add, rename, check off, remove items with realtime-friendly persistence
+- Clear separation of “yours” vs “shared with the group”
+
 ## UX Principles (First-Time Travelers)
 - Simple step-by-step flow (search → select → confirm)
 - Clear “best pick” explanations (price, time, baggage, stops)
@@ -102,6 +108,7 @@ Build an all-in-one travel platform for first-time travelers that plans, books, 
 - Auth, profiles, group model
 - Trip data schema
 - Base UI shell + navigation
+- Packing lists (personal + group) with database sync and row-level security
 
 ### Milestone 2 — Flights (SerpAPI)
 - Offer request + multi-city slices

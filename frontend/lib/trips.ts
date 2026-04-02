@@ -983,6 +983,27 @@ export function getTripsByTimeline(
   )
 }
 
+/** Calendar position vs today (UTC date boundaries), same rules as {@link getTripsByTimeline}. */
+export type TripTimelinePhase = "upcoming" | "active" | "past"
+
+export function getTripTimelinePhase(trip: Trip, referenceDate = new Date()): TripTimelinePhase {
+  const today = startOfUtcDay(referenceDate)
+  const start = parseDateUtc(trip.startDate)
+  const end = parseDateUtc(trip.endDate)
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "active"
+  if (today < start) return "upcoming"
+  if (today > end) return "past"
+  return "active"
+}
+
+/** Accessible one-line calendar context for status UI (pairs with {@link getTripStatusLabel}). */
+export function getTripTimelineSummary(trip: Trip, referenceDate = new Date()): string {
+  const phase = getTripTimelinePhase(trip, referenceDate)
+  if (phase === "upcoming") return `Trip starts ${formatHumanDate(trip.startDate)}`
+  if (phase === "past") return `Trip ended ${formatHumanDate(trip.endDate)}`
+  return `Trip ends ${formatHumanDate(trip.endDate)}`
+}
+
 function setTripTransitRoutes(trip: Trip, nextRoutes: TransitRoute[]): Trip {
   const now = new Date().toISOString().slice(0, 10)
   trip.transitRoutes = nextRoutes

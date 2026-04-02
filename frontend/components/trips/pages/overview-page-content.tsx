@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import { usePathname, useRouter } from "next/navigation"
 import { CheckCircle2Icon, Share2Icon, UserPlusIcon } from "lucide-react"
 import * as React from "react"
 import { toast } from "sonner"
@@ -20,7 +21,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Progress } from "@/components/ui/progress"
 import { cn } from "@/lib/utils"
 import {
   createTripCollaboratorInviteAction,
@@ -28,8 +28,16 @@ import {
   getTripMemberRoleAction,
 } from "@/lib/actions/trip-share-actions"
 import { toPublicAbsoluteUrl } from "@/lib/public-site-url"
-import type { Trip } from "@/lib/trips"
-import { getDateRangeLabel, getMissingChecklist, getNextStep, getTripTravelScope } from "@/lib/trips"
+import type { Trip, TripTimelinePhase } from "@/lib/trips"
+import {
+  getDateRangeLabel,
+  getMissingChecklist,
+  getNextStep,
+  getTripStatusLabel,
+  getTripTimelinePhase,
+  getTripTimelineSummary,
+  getTripTravelScope,
+} from "@/lib/trips"
 
 const progressSteps = [
   "Trip Basics",
@@ -41,6 +49,64 @@ const progressSteps = [
   "Ready",
 ]
 
+/** Match dashboard trip list badges; includes text + background (not color-only). */
+const STATUS_BADGE_CLASSES: Record<Trip["status"], string> = {
+  planning: "bg-amber-100 text-amber-900 dark:bg-amber-900/35 dark:text-amber-200",
+  booked: "bg-blue-100 text-blue-900 dark:bg-blue-900/35 dark:text-blue-200",
+  in_progress: "bg-green-100 text-green-900 dark:bg-green-900/35 dark:text-green-200",
+}
+
+/** Left accent pairs with timeline copy so state is not conveyed by color alone. */
+const PHASE_ACCENT: Record<TripTimelinePhase, string> = {
+  upcoming: "border-l-sky-500",
+  active: "border-l-emerald-600 dark:border-l-emerald-500",
+  past: "border-l-muted-foreground",
+}
+
+function TripOverviewStatusBar({
+  trip,
+  nextStep,
+}: {
+  trip: Trip
+  nextStep: ReturnType<typeof getNextStep>
+}) {
+  const phase = getTripTimelinePhase(trip)
+  const timelineSummary = getTripTimelineSummary(trip)
+  const statusLabel = getTripStatusLabel(trip.status)
+
+  return (
+    <section
+      role="region"
+      aria-label={`Trip status ${statusLabel}. ${timelineSummary}. Next step: ${nextStep.title}.`}
+      className={cn(
+        "rounded-lg border border-border bg-card/90 px-4 py-3 shadow-sm",
+        "border-l-4",
+        PHASE_ACCENT[phase]
+      )}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch sm:justify-between sm:gap-4">
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+          <Badge
+            className={cn("w-fit rounded-none font-medium", STATUS_BADGE_CLASSES[trip.status])}
+          >
+            {statusLabel}
+          </Badge>
+          <p className="text-sm text-muted-foreground">{timelineSummary}</p>
+        </div>
+        <div className="flex min-w-0 flex-col gap-1 border-t border-border pt-3 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0 lg:max-w-[min(100%,24rem)]">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Next step
+          </p>
+          <p className="text-sm font-medium leading-snug text-foreground">{nextStep.title}</p>
+          <Button asChild size="sm" variant="outline" className="mt-1 w-full sm:mt-2 sm:w-fit">
+            <Link href={nextStep.href}>{nextStep.cta}</Link>
+          </Button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
 export function OverviewPageContent() {
   const trip = useTripPage()
   if (!trip) {
@@ -50,6 +116,9 @@ export function OverviewPageContent() {
 }
 
 function OverviewPageBody({ trip }: { trip: Trip }) {
+  const router = useRouter()
+  const pathname = usePathname()
+  const prevPathRef = React.useRef<string | null>(null)
   const updateTrip = useUpdateTrip()
   const nextStep = getNextStep(trip)
   const missing = getMissingChecklist(trip)
@@ -64,6 +133,18 @@ function OverviewPageBody({ trip }: { trip: Trip }) {
   const [travelersDraft, setTravelersDraft] = React.useState(String(trip.travelers))
 
   React.useEffect(() => setMounted(true), [])
+
+  React.useEffect(() => {
+    const prev = prevPathRef.current
+    prevPathRef.current = pathname
+    const overviewPath = `/trips/${trip.id}`
+    const onOverview = pathname === overviewPath
+    const fromTripSubPage =
+      prev != null && prev.startsWith(`${overviewPath}/`) && pathname === overviewPath
+    if (onOverview && fromTripSubPage) {
+      router.refresh()
+    }
+  }, [pathname, router, trip.id])
 
   React.useEffect(() => {
     let cancelled = false
@@ -170,6 +251,7 @@ function OverviewPageBody({ trip }: { trip: Trip }) {
 
   return (
     <div className="space-y-4">
+      <TripOverviewStatusBar trip={trip} nextStep={nextStep} />
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -278,7 +360,7 @@ function OverviewPageBody({ trip }: { trip: Trip }) {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="mb-2 flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-2">
             {progressSteps.map((step, idx) => {
               const done = Math.floor((trip.progress / 100) * progressSteps.length) > idx
               return (
@@ -288,7 +370,6 @@ function OverviewPageBody({ trip }: { trip: Trip }) {
               )
             })}
           </div>
-          <Progress value={trip.progress} className="h-2" />
         </CardContent>
       </Card>
 

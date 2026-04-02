@@ -151,7 +151,9 @@ function categoryLabel(value: ExpenseCategory): string {
 
 export function FinancePageContent() {
   const trip = useTripPage()
-  if (!trip) {
+  const [mounted, setMounted] = React.useState(false)
+  React.useEffect(() => setMounted(true), [])
+  if (!trip || !mounted) {
     return <p className="text-sm text-muted-foreground">Loading trip…</p>
   }
   return <FinancePageBody trip={trip} />

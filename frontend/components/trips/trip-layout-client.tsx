@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { usePathname } from "next/navigation"
 
 import { useEnsureTripInStore, useTrip, useUpdateTrip } from "@/components/providers/trips-provider"
 import { getTripFlightsFromSupabase, type SavedFlightRow } from "@/lib/supabase-trip-flights"
@@ -58,6 +59,7 @@ export function TripLayoutClient({
 }) {
   const ensureTripInStore = useEnsureTripInStore()
   const updateTrip = useUpdateTrip()
+  const pathname = usePathname()
 
   const serverTripRef = React.useRef(serverTrip)
   serverTripRef.current = serverTrip
@@ -134,7 +136,16 @@ export function TripLayoutClient({
     return () => {
       cancelled = true
     }
-  }, [tripId, travelScope, updateTrip, liveTrip.startDate, liveTrip.endDate, liveTrip.totalDays])
+    // Re-sync when switching trip sub-routes (e.g. flights → overview) so the shell reflects latest DB state.
+  }, [
+    tripId,
+    travelScope,
+    updateTrip,
+    liveTrip.startDate,
+    liveTrip.endDate,
+    liveTrip.totalDays,
+    pathname,
+  ])
 
   const trip = liveTrip
   return <TripShell trip={trip}>{children}</TripShell>

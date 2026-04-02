@@ -19,6 +19,7 @@ import { useTripPage } from "@/components/trips/trip-shell"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Progress } from "@/components/ui/progress"
 import {
   Dialog,
   DialogContent,
@@ -98,6 +99,16 @@ const localizer = dateFnsLocalizer({
 })
 
 const DnDCalendar = withDragAndDrop<CalendarEvent>(Calendar)
+
+const TRIP_PROGRESS_STEPS = [
+  "Trip Basics",
+  "Flights",
+  "Hotels",
+  "Itinerary",
+  "Transit",
+  "Finance",
+  "Ready",
+]
 
 const STATUS_OPTIONS: Array<{ key: ItineraryStatus; label: string }> = [
   { key: "planned", label: "Planned" },
@@ -201,6 +212,15 @@ function categoryClass(category: ItineraryCategory): string {
   return CATEGORY_OPTIONS.find((option) => option.key === category)?.className ?? "bg-zinc-100 text-zinc-900"
 }
 
+function countItineraryDaysCovered(items: TripItineraryItem[], totalDays: number): number {
+  if (totalDays < 1) return 0
+  const set = new Set<number>()
+  for (const item of items) {
+    if (item.dayIndex >= 1 && item.dayIndex <= totalDays) set.add(item.dayIndex)
+  }
+  return set.size
+}
+
 function normalizeForCompare(items: TripItineraryItem[]): string {
   return JSON.stringify(
     items
@@ -300,6 +320,14 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
     () => tripCalendarBufferedDayCount(trip),
     [trip.id, trip.startDate, trip.endDate]
   )
+
+  const itineraryDaysCovered = React.useMemo(
+    () => countItineraryDaysCovered(draftItems, trip.totalDays),
+    [draftItems, trip.totalDays]
+  )
+
+  const itineraryDayPercent =
+    trip.totalDays > 0 ? Math.min(100, (itineraryDaysCovered / trip.totalDays) * 100) : 0
 
   const calendarDefaultDate = React.useMemo(
     () => tripCalendarBufferFirstDay(trip),
@@ -636,6 +664,46 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
           <CardTitle>Itinerary Planner</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
+          <div
+            className="space-y-3 rounded-lg border border-border bg-muted/30 px-3 py-3 sm:px-4"
+            role="group"
+            aria-label="Trip setup and itinerary planning progress"
+          >
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                Trip setup
+              </p>
+              <div className="flex flex-wrap gap-1.5 sm:gap-2">
+                {TRIP_PROGRESS_STEPS.map((step, idx) => {
+                  const done =
+                    Math.floor((trip.progress / 100) * TRIP_PROGRESS_STEPS.length) > idx
+                  return (
+                    <Badge
+                      key={step}
+                      variant={done ? "secondary" : "outline"}
+                      className="rounded-none text-[10px] sm:text-xs"
+                    >
+                      {step}
+                    </Badge>
+                  )
+                })}
+              </div>
+              <Progress value={trip.progress} className="h-2" aria-label="Overall trip setup progress" />
+            </div>
+            <div className="space-y-2 border-t border-border/80 pt-3">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <p className="font-semibold uppercase tracking-wide text-muted-foreground">
+                  Days with plans
+                </p>
+                <p className="tabular-nums text-foreground">
+                  <span className="sr-only">Progress: </span>
+                  {itineraryDaysCovered} of {trip.totalDays} days
+                </p>
+              </div>
+              <Progress value={itineraryDayPercent} className="h-2" aria-label="Fraction of trip days that include at least one itinerary item" />
+            </div>
+          </div>
+
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
             <p className="flex items-center gap-1">
               <CalendarDaysIcon className="size-3.5" />

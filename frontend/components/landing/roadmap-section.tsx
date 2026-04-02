@@ -19,13 +19,13 @@ const milestones: { label: string; detail: string; status: Status }[] = [
   },
   {
     label: "Flights",
-    detail: "SerpAPI Google Flights search, return flights, booking options.",
+    detail: "Manual flight log, outbound/inbound tracking, notes and stop details.",
     status: "done",
   },
   {
     label: "Hotels",
-    detail: "Search, availability, room selection, booking confirmation.",
-    status: "in-progress",
+    detail: "Manual hotel workspace with property, dates, area notes, and cost tracking.",
+    status: "done",
   },
   {
     label: "Itinerary + Suggestions",

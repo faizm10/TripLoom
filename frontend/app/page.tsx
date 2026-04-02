@@ -8,9 +8,9 @@ import { RoadmapSection } from "@/components/landing/roadmap-section"
 import { WhySection } from "@/components/landing/why-section"
 
 export const metadata: Metadata = {
-  title: "TripLoom | Plan, Book, and Manage Travel",
+  title: "TripLoom | Plan, Organize, and Manage Travel",
   description:
-    "TripLoom is an AI travel platform for first-time travelers to plan itineraries, compare flights and hotels, route transit, and explore nearby attractions.",
+    "TripLoom is an AI travel platform for first-time travelers to plan itineraries, organize trip details, route transit, and manage budgets.",
 }
 
 export default function Page() {
@@ -21,7 +21,7 @@ export default function Page() {
     applicationCategory: "TravelApplication",
     operatingSystem: "Web",
     description:
-      "TripLoom is an AI-powered travel planning and booking platform for first-time travelers.",
+      "TripLoom is an AI-powered travel planning platform for first-time travelers.",
     offers: {
       "@type": "Offer",
       price: "0",

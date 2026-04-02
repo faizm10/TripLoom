@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server"
 
 export const metadata: Metadata = {
   title: "Dashboard",
-  description: "TripLoom dashboard for onboarding, bookings, transit, and AI trip planning.",
+  description: "TripLoom dashboard for onboarding, trip management, transit, and AI trip planning.",
   robots: {
     index: false,
     follow: false,

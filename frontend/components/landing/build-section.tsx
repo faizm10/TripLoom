@@ -18,7 +18,7 @@ const features = [
     icon: PlaneIcon,
     title: "Flights",
     description:
-      "One-way, round-trip, and multi-city search via SerpAPI Google Flights. Compare stops, baggage, and duration with clear tradeoffs.",
+      "Log outbound, inbound, and multi-city legs with departure times, stops, and notes — your flight details in one tidy workspace.",
     color: "text-blue-500",
     bg: "bg-blue-500/10",
   },
@@ -26,7 +26,7 @@ const features = [
     icon: HotelIcon,
     title: "Hotels",
     description:
-      "Search by area, filter by rating and amenities, pick the right room type, and book with confidence.",
+      "Record property names, check-in/out dates, area notes, and costs so every stay is easy to find at a glance.",
     color: "text-amber-500",
     bg: "bg-amber-500/10",
   },
@@ -50,7 +50,7 @@ const features = [
     icon: BotIcon,
     title: "AI Assistant",
     description:
-      "Ask it to plan your whole trip, explain tradeoffs, or add bookings. GPT-4.1 with tool calling.",
+      "Ask it to plan your whole trip, explain tradeoffs, or fill in details. GPT-4.1 with tool calling.",
     color: "text-violet-500",
     bg: "bg-violet-500/10",
   },
@@ -74,7 +74,7 @@ const features = [
     icon: ZapIcon,
     title: "One Workflow",
     description:
-      "Search → select → confirm, from flights to itinerary to budget. No app-switching required.",
+      "Plan → organize → share, from itinerary to budget to group coordination. No app-switching required.",
     color: "text-orange-500",
     bg: "bg-orange-500/10",
   },

@@ -22,8 +22,8 @@ const fadeUp = {
 }
 
 const stats = [
-  { icon: PlaneIcon, label: "Flights", value: "SerpAPI" },
-  { icon: MapPinIcon, label: "Hotels", value: "Booking.com" },
+  { icon: PlaneIcon, label: "Flights", value: "Manual Log" },
+  { icon: MapPinIcon, label: "Hotels", value: "Manual Log" },
   { icon: CalendarDaysIcon, label: "Itinerary", value: "Day Planner" },
   { icon: SparklesIcon, label: "AI", value: "GPT-4.1" },
 ]
@@ -104,9 +104,9 @@ export function HeroSection() {
           custom={0.2}
           className="mt-6 max-w-2xl text-lg text-muted-foreground"
         >
-          TripLoom guides first-time travelers through every step — flights,
-          hotels, itineraries, transit, budgets, and group coordination — in one
-          seamless workflow with AI support throughout.
+          TripLoom guides first-time travelers through every step — itineraries,
+          transit, budgets, and group coordination — in one seamless workspace
+          with AI support throughout.
         </motion.p>
 
         {/* CTAs */}

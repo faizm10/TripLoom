@@ -22,28 +22,28 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   metadataBase: new URL("https://triploom.com"),
   title: {
-    default: "TripLoom | AI Travel Planning and Booking",
+    default: "TripLoom | AI Travel Planning",
     template: "%s | TripLoom",
   },
   description:
-    "TripLoom helps first-time travelers plan, book, and manage flights, hotels, transit, and attractions in one guided platform.",
+    "TripLoom helps first-time travelers plan, organize, and manage trips — itineraries, transit, budgets, and group coordination in one guided platform.",
   applicationName: "TripLoom",
   keywords: [
     "TripLoom",
     "travel planning platform",
     "AI travel assistant",
-    "flight and hotel booking",
     "itinerary builder",
     "transit routing",
     "group travel planning",
     "first-time travelers",
+    "trip organizer",
   ],
   openGraph: {
     type: "website",
     siteName: "TripLoom",
-    title: "TripLoom | AI Travel Planning and Booking",
+    title: "TripLoom | AI Travel Planning",
     description:
-      "Plan, book, and manage your trips with AI guidance for flights, hotels, transit, and attractions.",
+      "Plan, organize, and manage your trips with AI guidance — itineraries, transit, budgets, and group coordination.",
     url: "https://triploom.com",
     locale: "en_US",
     images: [
@@ -57,9 +57,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "TripLoom | AI Travel Planning and Booking",
+    title: "TripLoom | AI Travel Planning",
     description:
-      "The all-in-one travel workflow for first-time travelers: itinerary, bookings, transit, and AI support.",
+      "The all-in-one travel workspace for first-time travelers: itinerary, transit, budgets, and AI support.",
     images: ["/twitter-image"],
   },
   icons: {

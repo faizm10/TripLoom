@@ -40,7 +40,7 @@ export function CtaSection() {
         </h2>
         <p className="mx-auto mt-4 max-w-lg text-muted-foreground">
           No signup required to explore. Create a trip, build your itinerary,
-          compare flights — all in one place.
+          and organize everything — all in one place.
         </p>
 
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">

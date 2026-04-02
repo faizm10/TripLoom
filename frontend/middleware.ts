@@ -39,14 +39,29 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser()
 
-  // Protect dashboard and trips — redirect to login if unauthenticated
+  // Protect dashboard, trips, and admin — redirect to login if unauthenticated
   const isProtected =
-    pathname.startsWith("/dashboard") || pathname.startsWith("/trips")
+    pathname.startsWith("/dashboard") || pathname.startsWith("/trips") || pathname.startsWith("/admin")
 
   if (!user && isProtected) {
     const url = request.nextUrl.clone()
     url.pathname = "/auth/login"
     return NextResponse.redirect(url)
+  }
+
+  // Admin routes: require email in ADMIN_EMAILS allowlist
+  if (user && pathname.startsWith("/admin")) {
+    const adminEmails = new Set(
+      (process.env.ADMIN_EMAILS ?? "")
+        .split(",")
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean)
+    )
+    if (!adminEmails.has((user.email ?? "").toLowerCase())) {
+      const url = request.nextUrl.clone()
+      url.pathname = "/dashboard"
+      return NextResponse.redirect(url)
+    }
   }
 
   // Redirect logged-in users away from auth pages

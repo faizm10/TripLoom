@@ -546,13 +546,10 @@ function normalizeExpense(tripId: string, raw: Partial<TripExpense>): TripExpens
   }
 }
 
-function getPaceWeightedAmount(expense: TripExpense, totalTripDays: number): number {
-  if (expense.category !== "hotels") return expense.amount
-  // Allocator entries are already split per day.
-  if (typeof expense.notes === "string" && expense.notes.startsWith(HOTEL_ALLOCATOR_NOTE_PREFIX)) {
-    return expense.amount
-  }
-  return expense.amount / Math.max(1, totalTripDays)
+const FIXED_COST_CATEGORIES: Set<ExpenseCategory> = new Set(["flights", "hotels"])
+
+export function isFixedCost(expense: TripExpense): boolean {
+  return FIXED_COST_CATEGORIES.has(expense.category)
 }
 
 export function getTripFinance(trip: Trip): TripFinance {
@@ -613,10 +610,7 @@ export function getTripFinance(trip: Trip): TripFinance {
   }
 }
 
-export function getFinanceSummary(
-  trip: Trip,
-  referenceDate = new Date()
-): {
+export type FinanceSummary = {
   budgetTotal: number
   currency: string
   spent: number
@@ -628,19 +622,44 @@ export function getFinanceSummary(
   elapsedTripDays: number
   actualDaily: number
   plannedDaily: number
-} {
+  fixedCostsSpent: number
+  dailySpent: number
+  dailyPlannedBudget: number
+  dailyActualPace: number
+  spentPercent: number
+}
+
+export function getFinanceSummary(
+  trip: Trip,
+  referenceDate = new Date()
+): FinanceSummary {
   const finance = getTripFinance(trip)
   const missingRateCurrencies = new Set<string>()
-  const spent = finance.expenses.reduce((total, expense) => {
-    const expenseCurrency = (expense.currency || finance.currency).toUpperCase()
-    if (expenseCurrency === finance.currency.toUpperCase()) return total + expense.amount
-    const rate = finance.exchangeRates[expenseCurrency]
+
+  const toBase = (expense: Pick<TripExpense, "amount" | "currency">): number => {
+    const cur = (expense.currency || finance.currency).toUpperCase()
+    if (cur === finance.currency.toUpperCase()) return expense.amount
+    const rate = finance.exchangeRates[cur]
     if (!rate || rate <= 0) {
-      missingRateCurrencies.add(expenseCurrency)
-      return total + expense.amount
+      missingRateCurrencies.add(cur)
+      return expense.amount
     }
-    return total + expense.amount * rate
-  }, 0)
+    return expense.amount * rate
+  }
+
+  let spent = 0
+  let fixedCostsSpent = 0
+  let dailySpent = 0
+  for (const expense of finance.expenses) {
+    const base = toBase(expense)
+    spent += base
+    if (isFixedCost(expense)) {
+      fixedCostsSpent += base
+    } else {
+      dailySpent += base
+    }
+  }
+
   const remaining = finance.budgetTotal - spent
   const travelers = finance.groupModeEnabled
     ? Math.max(1, finance.groupSize)
@@ -664,12 +683,13 @@ export function getFinanceSummary(
     elapsedTripDays = Math.min(totalTripDays, Math.max(1, Math.floor(elapsedMs / 86400000) + 1))
   }
 
-  const paceWeightedSpend = finance.expenses.reduce(
-    (total, expense) => total + getPaceWeightedAmount(expense, totalTripDays),
-    0
-  )
+  const dailyBudgetPool = Math.max(0, finance.budgetTotal - fixedCostsSpent)
+  const dailyPlannedBudget = dailyBudgetPool > 0 ? dailyBudgetPool / totalTripDays : 0
+  const dailyActualPace = dailySpent > 0 ? dailySpent / elapsedTripDays : 0
+
   const plannedDaily = finance.budgetTotal > 0 ? finance.budgetTotal / totalTripDays : 0
-  const actualDaily = paceWeightedSpend > 0 ? paceWeightedSpend / elapsedTripDays : 0
+  const actualDaily = spent > 0 ? spent / elapsedTripDays : 0
+  const spentPercent = finance.budgetTotal > 0 ? Math.min(100, (spent / finance.budgetTotal) * 100) : 0
 
   return {
     budgetTotal: finance.budgetTotal,
@@ -683,6 +703,11 @@ export function getFinanceSummary(
     elapsedTripDays,
     actualDaily,
     plannedDaily,
+    fixedCostsSpent,
+    dailySpent,
+    dailyPlannedBudget,
+    dailyActualPace,
+    spentPercent,
   }
 }
 
@@ -697,13 +722,9 @@ export function runFinanceGuardrails(
 } {
   const finance = getTripFinance(trip)
   const summary = getFinanceSummary(trip, referenceDate)
-  const trackedPaceSpend = finance.expenses
-    .filter((expense) => expense.category !== "flights")
-    .reduce((total, expense) => total + getPaceWeightedAmount(expense, summary.totalTripDays), 0)
-  const trackedActualDaily =
-    trackedPaceSpend > 0 ? trackedPaceSpend / summary.elapsedTripDays : 0
+  const trackedActualDaily = summary.dailyActualPace
 
-  if (summary.budgetTotal <= 0 || summary.plannedDaily <= 0) {
+  if (summary.budgetTotal <= 0 || summary.dailyPlannedBudget <= 0) {
     return {
       status: "on_track",
       ratioPercent: 0,
@@ -712,7 +733,7 @@ export function runFinanceGuardrails(
     }
   }
 
-  const ratioPercent = (trackedActualDaily / summary.plannedDaily) * 100
+  const ratioPercent = (trackedActualDaily / summary.dailyPlannedBudget) * 100
   let status: FinanceGuardrailStatus = "on_track"
 
   if (ratioPercent > finance.automation.criticalAtPercent) {
@@ -721,8 +742,9 @@ export function runFinanceGuardrails(
     status = "watch"
   }
 
+  const dailyBudgetPool = Math.max(0, summary.budgetTotal - summary.fixedCostsSpent)
   const projectedExceedDay =
-    trackedActualDaily > 0 ? Math.ceil(summary.budgetTotal / trackedActualDaily) : null
+    trackedActualDaily > 0 ? Math.ceil(dailyBudgetPool / trackedActualDaily) : null
 
   const suggestions: string[] = []
   if (
@@ -761,7 +783,7 @@ export function runFinanceGuardrails(
       }
     )
     const topCategory = (Object.keys(categoryTotals) as ExpenseCategory[])
-      .filter((category) => category !== "flights")
+      .filter((category) => !FIXED_COST_CATEGORIES.has(category))
       .sort((a, b) => categoryTotals[b] - categoryTotals[a])[0]
     if (topCategory && categoryTotals[topCategory] > 0) {
       suggestions.push(

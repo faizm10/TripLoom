@@ -10,7 +10,7 @@ import {
   startOfWeek,
 } from "date-fns"
 import { enUS } from "date-fns/locale"
-import { CalendarDaysIcon, ExternalLinkIcon, LinkIcon, PlusIcon, SaveIcon, Trash2Icon } from "lucide-react"
+import { CalendarDaysIcon, ExternalLinkIcon, LinkIcon, PlusIcon, Trash2Icon } from "lucide-react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 
@@ -19,7 +19,7 @@ import { useTripPage } from "@/components/trips/trip-shell"
 import {
   deleteTripItineraryItemFromSupabase,
   getTripItineraryFromSupabase,
-  saveTripItineraryBatchToSupabase,
+  saveTripItineraryItemToSupabase,
 } from "@/lib/supabase-trip-itinerary"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -49,7 +49,6 @@ import type {
 import {
   defaultBlockWindow,
   getDateRangeLabel,
-  getTripItineraryItems,
   getTripTimezone,
   normalizeSortOrder,
   resolveItineraryEndLocal,
@@ -226,29 +225,6 @@ function countItineraryDaysCovered(items: TripItineraryItem[], totalDays: number
   return set.size
 }
 
-function normalizeForCompare(items: TripItineraryItem[]): string {
-  return JSON.stringify(
-    items
-      .slice()
-      .sort((a, b) => a.id.localeCompare(b.id))
-      .map((item) => ({
-        id: item.id,
-        dayIndex: item.dayIndex,
-        timeBlock: item.timeBlock,
-        status: item.status,
-        category: item.category,
-        title: item.title,
-        locationLabel: item.locationLabel,
-        notes: item.notes ?? "",
-        commuteDetails: item.commuteDetails ?? "",
-        locationLink: item.locationLink ?? "",
-        googleMapsLink: item.googleMapsLink ?? "",
-        startTimeLocal: item.startTimeLocal ?? "",
-        endTimeLocal: item.endTimeLocal ?? "",
-        sortOrder: item.sortOrder,
-      }))
-  )
-}
 
 export function ItineraryPageContent() {
   const trip = useTripPage()
@@ -265,20 +241,22 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
   const timezone = getTripTimezone(trip)
   const { setTripItineraryItems } = useTripItineraryActions()
 
-  const persistedItems = React.useMemo(() => getTripItineraryItems(trip), [trip])
-  const [draftItems, setDraftItems] = React.useState<TripItineraryItem[]>(persistedItems)
-  const [saving, setSaving] = React.useState(false)
-  const dbItemIdsRef = React.useRef<Set<string>>(new Set())
+  const [items, setItems] = React.useState<TripItineraryItem[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [busy, setBusy] = React.useState(false)
+
+  const reload = React.useCallback(async () => {
+    const rows = await getTripItineraryFromSupabase(trip.id)
+    const sorted = normalizeSortOrder(rows)
+    setItems(sorted)
+    setTripItineraryItems(trip.id, sorted)
+    return sorted
+  }, [trip.id, setTripItineraryItems])
 
   React.useEffect(() => {
-    let cancelled = false
-    getTripItineraryFromSupabase(trip.id).then((rows) => {
-      if (cancelled || rows.length === 0) return
-      dbItemIdsRef.current = new Set(rows.map((r) => r.id))
-      setTripItineraryItems(trip.id, rows)
-    })
-    return () => { cancelled = true }
-  }, [trip.id, setTripItineraryItems])
+    reload().finally(() => setLoading(false))
+  }, [reload])
+
   const [calendarView, setCalendarView] = React.useState<View>(() => {
     const calendar = searchParams.get("calendar")
     if (calendar === "month") return Views.MONTH
@@ -298,10 +276,6 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
   const [copyLinksOpen, setCopyLinksOpen] = React.useState(false)
   const [exportLinks, setExportLinks] = React.useState<string[]>([])
   const [isMobile, setIsMobile] = React.useState(false)
-
-  React.useEffect(() => {
-    setDraftItems(persistedItems)
-  }, [persistedItems])
 
   React.useEffect(() => {
     const evaluate = () => setIsMobile(window.innerWidth < 768)
@@ -339,8 +313,8 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
   )
 
   const itineraryDaysCovered = React.useMemo(
-    () => countItineraryDaysCovered(draftItems, trip.totalDays),
-    [draftItems, trip.totalDays]
+    () => countItineraryDaysCovered(items, trip.totalDays),
+    [items, trip.totalDays]
   )
 
   const itineraryDayPercent =
@@ -350,6 +324,8 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
     () => tripCalendarBufferFirstDay(trip),
     [trip.id, trip.startDate, trip.endDate]
   )
+
+  const [calendarDate, setCalendarDate] = React.useState<Date>(calendarDefaultDate)
 
   const syncQueryState = React.useCallback(
     (nextView: View, nextStatus: StatusFilter) => {
@@ -405,11 +381,6 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
     if (next !== current) router.replace(next, { scroll: false })
   }, [calendarView, pathname, router, searchParams, statusFilter])
 
-  const isDirty = React.useMemo(
-    () => normalizeForCompare(draftItems) !== normalizeForCompare(persistedItems),
-    [draftItems, persistedItems]
-  )
-
   const dayNumbers = React.useMemo(
     () => Array.from({ length: Math.max(1, trip.totalDays) }, (_, index) => index + 1),
     [trip.totalDays]
@@ -417,7 +388,7 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
 
   const calendarEvents = React.useMemo<CalendarEvent[]>(
     () =>
-      draftItems
+      items
         .filter((item) => statusFilter === "all" || item.status === statusFilter)
         .map((item) => {
           const start = dateFromLocalString(resolveItineraryStartLocal(item, trip))
@@ -433,7 +404,7 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
           }
         })
         .filter((event): event is CalendarEvent => Boolean(event)),
-    [draftItems, statusFilter, trip]
+    [items, statusFilter, trip]
   )
 
   const openCreateDialog = React.useCallback(
@@ -467,7 +438,7 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
     [trip]
   )
 
-  const upsertDraftItem = React.useCallback(() => {
+  const saveItem = React.useCallback(async () => {
     const validation = validateItineraryItemDraft(
       {
         title: form.title,
@@ -492,160 +463,114 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
     const inferredBlock = timeBlockFromDate(startDate)
     const now = new Date().toISOString()
 
-    setDraftItems((prev) => {
-      if (editingId) {
-        return normalizeSortOrder(
-          prev.map((item) =>
-            item.id === editingId
-              ? {
-                  ...item,
-                  title: form.title.trim(),
-                  locationLabel: form.locationLabel.trim(),
-                  dayIndex: inferredDay,
-                  timeBlock: inferredBlock,
-                  status: form.status,
-                  category: form.category,
-                  notes: form.notes.trim() || undefined,
-                  commuteDetails: form.commuteDetails.trim() || undefined,
-                  locationLink: form.locationLink.trim() || undefined,
-                  googleMapsLink: form.googleMapsLink.trim() || undefined,
-                  startTimeLocal: form.startTimeLocal,
-                  endTimeLocal: form.endTimeLocal,
-                  updatedAt: now,
-                }
-              : item
-          )
-        )
-      }
+    const item: TripItineraryItem = editingId
+      ? {
+          ...(items.find((i) => i.id === editingId) as TripItineraryItem),
+          title: form.title.trim(),
+          locationLabel: form.locationLabel.trim(),
+          dayIndex: inferredDay,
+          timeBlock: inferredBlock,
+          status: form.status,
+          category: form.category,
+          notes: form.notes.trim() || undefined,
+          commuteDetails: form.commuteDetails.trim() || undefined,
+          locationLink: form.locationLink.trim() || undefined,
+          googleMapsLink: form.googleMapsLink.trim() || undefined,
+          startTimeLocal: form.startTimeLocal,
+          endTimeLocal: form.endTimeLocal,
+          updatedAt: now,
+        }
+      : {
+          id: randomId(),
+          tripId: trip.id,
+          dayIndex: inferredDay,
+          timeBlock: inferredBlock,
+          status: form.status,
+          category: form.category,
+          title: form.title.trim(),
+          locationLabel: form.locationLabel.trim(),
+          notes: form.notes.trim() || undefined,
+          commuteDetails: form.commuteDetails.trim() || undefined,
+          locationLink: form.locationLink.trim() || undefined,
+          googleMapsLink: form.googleMapsLink.trim() || undefined,
+          startTimeLocal: form.startTimeLocal,
+          endTimeLocal: form.endTimeLocal,
+          sortOrder: 9999,
+          createdAt: now,
+          updatedAt: now,
+        }
 
-      const nextItem: TripItineraryItem = {
-        id: randomId(),
-        tripId: trip.id,
-        dayIndex: inferredDay,
-        timeBlock: inferredBlock,
-        status: form.status,
-        category: form.category,
-        title: form.title.trim(),
-        locationLabel: form.locationLabel.trim(),
-        notes: form.notes.trim() || undefined,
-        commuteDetails: form.commuteDetails.trim() || undefined,
-        locationLink: form.locationLink.trim() || undefined,
-        googleMapsLink: form.googleMapsLink.trim() || undefined,
-        startTimeLocal: form.startTimeLocal,
-        endTimeLocal: form.endTimeLocal,
-        sortOrder: 9999,
-        createdAt: now,
-        updatedAt: now,
-      }
-
-      return normalizeSortOrder([...prev, nextItem])
-    })
-
+    setBusy(true)
     setDialogOpen(false)
     setEditingId(null)
-  }, [editingId, form, trip])
-
-  const handleDeleteItem = React.useCallback((itemId: string) => {
-    setDraftItems((prev) => normalizeSortOrder(prev.filter((item) => item.id !== itemId)))
-    toast.message("Item removed from draft.")
-  }, [])
-
-  const handleSave = React.useCallback(async () => {
-    for (const item of draftItems) {
-      const error = validateItineraryItemDraft(
-        {
-          title: item.title,
-          locationLabel: item.locationLabel,
-          dayIndex: item.dayIndex,
-        },
-        trip.totalDays
-      )
-      if (error) {
-        toast.error(error)
-        return
-      }
-    }
-
-    const normalized = normalizeSortOrder(draftItems)
-    setSaving(true)
     try {
-      const currentIds = new Set(normalized.map((i) => i.id))
-      const removedIds = [...dbItemIdsRef.current].filter((id) => !currentIds.has(id))
-
-      await Promise.all([
-        saveTripItineraryBatchToSupabase(trip.id, normalized),
-        ...removedIds.map((id) => deleteTripItineraryItemFromSupabase(trip.id, id)),
-      ])
-
-      dbItemIdsRef.current = currentIds
-      setTripItineraryItems(trip.id, normalized)
-      toast.success("Itinerary saved.")
+      await saveTripItineraryItemToSupabase(trip.id, item)
+      await reload()
+      toast.success(editingId ? "Item updated." : "Item added.")
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save itinerary")
+      toast.error(err instanceof Error ? err.message : "Failed to save item.")
     } finally {
-      setSaving(false)
+      setBusy(false)
     }
-  }, [draftItems, setTripItineraryItems, trip.id, trip.totalDays])
+  }, [editingId, form, items, reload, trip])
 
-  const handleDiscard = React.useCallback(() => {
-    setDraftItems(persistedItems)
-    toast.message("Unsaved changes discarded.")
-  }, [persistedItems])
+  const handleDeleteItem = React.useCallback(async (itemId: string) => {
+    setBusy(true)
+    try {
+      await deleteTripItineraryItemFromSupabase(trip.id, itemId)
+      await reload()
+      toast.success("Item deleted.")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete item.")
+    } finally {
+      setBusy(false)
+    }
+  }, [reload, trip.id])
 
-  const handleCalendarEventDrop = React.useCallback(
-    ({ event, start, end }: { event: CalendarEvent; start: Date | string; end: Date | string }) => {
+
+  const persistEventMove = React.useCallback(
+    async (event: CalendarEvent, start: Date | string, end: Date | string) => {
       const nextStart = start instanceof Date ? start : new Date(start)
       const nextEnd = end instanceof Date ? end : new Date(end)
       if (Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime())) return
 
       const dayIndex = inferDayIndexFromDate(nextStart, trip)
       const timeBlock = timeBlockFromDate(nextStart)
-      setDraftItems((prev) =>
-        normalizeSortOrder(
-          prev.map((item) =>
-            item.id === event.resource.id
-              ? {
-                  ...item,
-                  dayIndex,
-                  timeBlock,
-                  startTimeLocal: localInputValueFromDate(nextStart),
-                  endTimeLocal: localInputValueFromDate(nextEnd),
-                  updatedAt: new Date().toISOString(),
-                }
-              : item
-          )
-        )
+      const updated: TripItineraryItem = {
+        ...event.resource,
+        dayIndex,
+        timeBlock,
+        startTimeLocal: localInputValueFromDate(nextStart),
+        endTimeLocal: localInputValueFromDate(nextEnd),
+        updatedAt: new Date().toISOString(),
+      }
+
+      setItems((prev) =>
+        normalizeSortOrder(prev.map((i) => (i.id === updated.id ? updated : i)))
       )
+      try {
+        await saveTripItineraryItemToSupabase(trip.id, updated)
+        await reload()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed to save move.")
+        await reload()
+      }
     },
-    [trip]
+    [reload, trip]
+  )
+
+  const handleCalendarEventDrop = React.useCallback(
+    ({ event, start, end }: { event: CalendarEvent; start: Date | string; end: Date | string }) => {
+      persistEventMove(event, start, end)
+    },
+    [persistEventMove]
   )
 
   const handleCalendarEventResize = React.useCallback(
     ({ event, start, end }: { event: CalendarEvent; start: Date | string; end: Date | string }) => {
-      const nextStart = start instanceof Date ? start : new Date(start)
-      const nextEnd = end instanceof Date ? end : new Date(end)
-      if (Number.isNaN(nextStart.getTime()) || Number.isNaN(nextEnd.getTime())) return
-
-      const dayIndex = inferDayIndexFromDate(nextStart, trip)
-      const timeBlock = timeBlockFromDate(nextStart)
-      setDraftItems((prev) =>
-        normalizeSortOrder(
-          prev.map((item) =>
-            item.id === event.resource.id
-              ? {
-                  ...item,
-                  dayIndex,
-                  timeBlock,
-                  startTimeLocal: localInputValueFromDate(nextStart),
-                  endTimeLocal: localInputValueFromDate(nextEnd),
-                  updatedAt: new Date().toISOString(),
-                }
-              : item
-          )
-        )
-      )
+      persistEventMove(event, start, end)
     },
-    [trip]
+    [persistEventMove]
   )
 
   const handleCalendarSelectSlot = React.useCallback(
@@ -667,7 +592,7 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
   )
 
   const handleExportGoogle = React.useCallback(() => {
-    const allItems = normalizeSortOrder(draftItems)
+    const allItems = normalizeSortOrder(items)
     if (allItems.length === 0) {
       toast.error("No itinerary items to export.")
       return
@@ -689,7 +614,7 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
     })
 
     toast.success(`Opened export for ${allItems.length} events.`)
-  }, [draftItems, trip])
+  }, [items, trip])
 
   return (
     <div className="space-y-4">
@@ -743,16 +668,9 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
               <CalendarDaysIcon className="size-3.5" />
               {trip.totalDays} days • {getDateRangeLabel(trip)} • {timezone}
             </p>
-            <div className="flex items-center gap-2">
-              {isDirty ? <Badge variant="outline">Unsaved changes</Badge> : null}
-              <Button variant="outline" size="sm" onClick={handleDiscard} disabled={!isDirty}>
-                Discard
-              </Button>
-              <Button size="sm" onClick={handleSave} disabled={!isDirty || saving}>
-                <SaveIcon />
-                {saving ? "Saving…" : "Save Changes"}
-              </Button>
-            </div>
+            {busy && (
+              <Badge variant="outline">Saving…</Badge>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -765,12 +683,12 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
                 <ExternalLinkIcon />
                 Export All Events
               </Button>
-              {draftItems.length > 0 ? (
+              {items.length > 0 ? (
                 <Button
                   size="sm"
                   variant="ghost"
                   onClick={() => {
-                    setExportLinks(buildGoogleExportBatch(normalizeSortOrder(draftItems), trip))
+                    setExportLinks(buildGoogleExportBatch(normalizeSortOrder(items), trip))
                     setCopyLinksOpen(true)
                   }}
                 >
@@ -819,9 +737,10 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
                 localizer={localizer}
                 events={calendarEvents}
                 view={calendarView}
+                date={calendarDate}
+                onNavigate={setCalendarDate}
                 onView={handleCalendarViewChange}
                 views={calendarViews as React.ComponentProps<typeof Calendar>["views"]}
-                defaultDate={calendarDefaultDate}
                 length={agendaDaySpan}
                 showMultiDayTimes
                 startAccessor="start"
@@ -838,9 +757,10 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
                 localizer={localizer}
                 events={calendarEvents}
                 view={calendarView}
+                date={calendarDate}
+                onNavigate={setCalendarDate}
                 onView={handleCalendarViewChange}
                 views={calendarViews as React.ComponentProps<typeof Calendar>["views"]}
-                defaultDate={calendarDefaultDate}
                 length={agendaDaySpan}
                 showMultiDayTimes
                 startAccessor="start"
@@ -862,34 +782,38 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
 
           <div className="rounded-md bg-muted/20 p-2">
             <p className="mb-2 text-sm font-medium">Current Items</p>
-            <div className="space-y-2">
-              {normalizeSortOrder(draftItems).map((item) => (
-                <div key={item.id} className="rounded bg-background p-2">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="space-y-0.5">
-                      <p className="text-sm font-medium">{item.title}</p>
-                      <p className="text-xs text-muted-foreground">{item.locationLabel}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {resolveItineraryStartLocal(item, trip)} - {resolveItineraryEndLocal(item, trip)}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline">{item.status}</Badge>
-                      <Button size="sm" variant="outline" onClick={() => openEditDialog(item)}>
-                        Edit
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => handleDeleteItem(item.id)}>
-                        <Trash2Icon className="size-3" />
-                        Delete
-                      </Button>
+            {loading ? (
+              <p className="text-xs text-muted-foreground">Loading…</p>
+            ) : (
+              <div className="space-y-2">
+                {items.map((item) => (
+                  <div key={item.id} className="rounded bg-background p-2">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <p className="text-sm font-medium">{item.title}</p>
+                        <p className="text-xs text-muted-foreground">{item.locationLabel}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {resolveItineraryStartLocal(item, trip)} - {resolveItineraryEndLocal(item, trip)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">{item.status}</Badge>
+                        <Button size="sm" variant="outline" onClick={() => openEditDialog(item)} disabled={busy}>
+                          Edit
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleDeleteItem(item.id)} disabled={busy}>
+                          <Trash2Icon className="size-3" />
+                          Delete
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-              {draftItems.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No itinerary items yet.</p>
-              ) : null}
-            </div>
+                ))}
+                {items.length === 0 && (
+                  <p className="text-xs text-muted-foreground">No itinerary items yet.</p>
+                )}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -1101,7 +1025,7 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={upsertDraftItem}>{editingId ? "Update item" : "Add item"}</Button>
+            <Button onClick={saveItem} disabled={busy}>{busy ? "Saving…" : editingId ? "Update item" : "Add item"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1116,7 +1040,7 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
           </DialogHeader>
           <div className="max-h-72 space-y-2 overflow-y-auto rounded-md bg-muted/20 p-2">
             {exportLinks.map((link, index) => {
-              const item = draftItems[index]
+              const item = items[index]
               return (
                 <div key={link} className="rounded bg-background p-2">
                   <p className="mb-1 text-xs font-medium">{item?.title ?? `Event ${index + 1}`}</p>

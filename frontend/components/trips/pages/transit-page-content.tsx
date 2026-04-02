@@ -32,11 +32,19 @@ import {
   Textarea,
 } from "@/components/ui/textarea"
 import {
-  getTripTransitRoutes,
+  deleteTripTransitRouteFromSupabase,
+  getTripTransitRoutesFromSupabase,
+  saveTripTransitRouteToSupabase,
+} from "@/lib/supabase-trip-transit"
+import {
+  getTripTravelScope,
   type TransitMode,
   type TransitRoute,
   type Trip,
 } from "@/lib/trips"
+
+// Routes are now loaded directly from Supabase in each view component,
+// not from the in-memory trip store.
 
 type TransitSuggestion = {
   summaryLabel: string
@@ -329,13 +337,393 @@ export function TransitPageContent() {
   if (!trip) {
     return <p className="text-sm text-muted-foreground">Loading trip…</p>
   }
+  if (getTripTravelScope(trip) === "domestic") {
+    return <DomesticTransitView trip={trip} />
+  }
   return <TransitPageBody trip={trip} />
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Domestic Transit — lightweight "lines, fares & essentials" view
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+type DomesticDraft = {
+  dayIndex: number
+  title: string
+  mode: TransitMode
+  fare: string
+  currency: string
+  notes: string
+  referenceUrl: string
+  fromLabel: string
+  toLabel: string
+}
+
+function buildEmptyDomesticDraft(): DomesticDraft {
+  return {
+    dayIndex: 1,
+    title: "",
+    mode: "rail",
+    fare: "",
+    currency: "CAD",
+    notes: "",
+    referenceUrl: "",
+    fromLabel: "",
+    toLabel: "",
+  }
+}
+
+function DomesticTransitView({ trip }: { trip: Trip }) {
+  const updateTrip = useUpdateTrip()
+
+  const [routes, setRoutes] = React.useState<TransitRoute[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [draft, setDraft] = React.useState<DomesticDraft>(buildEmptyDomesticDraft)
+  const [editingId, setEditingId] = React.useState<string | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const [showLeg, setShowLeg] = React.useState(false)
+  const [saving, setSaving] = React.useState(false)
+
+  React.useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    getTripTransitRoutesFromSupabase(trip.id).then((rows) => {
+      if (cancelled) return
+      const sorted = sortRoutes(rows)
+      setRoutes(sorted)
+      updateTrip(trip.id, { transitRoutes: sorted, transitSaved: sorted.length > 0 })
+      setLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [trip.id, updateTrip])
+
+  const dayOptions = React.useMemo(
+    () => Array.from({ length: trip.totalDays }, (_, idx) => idx + 1),
+    [trip.totalDays]
+  )
+  const dayWeekdayMap = React.useMemo(
+    () => buildDayWeekdayMap(trip.startDate, trip.totalDays),
+    [trip.startDate, trip.totalDays]
+  )
+
+  const groupedRoutes = React.useMemo(() => {
+    const grouped = new Map<number, TransitRoute[]>()
+    for (const route of routes) {
+      const existing = grouped.get(route.dayIndex) ?? []
+      existing.push(route)
+      grouped.set(route.dayIndex, existing)
+    }
+    return grouped
+  }, [routes])
+
+  function syncStore(next: TransitRoute[]) {
+    setRoutes(next)
+    updateTrip(trip.id, { transitRoutes: next, transitSaved: next.length > 0 })
+  }
+
+  async function handleSave() {
+    const title = draft.title.trim()
+    if (!title) { setError("Give this entry a title (line, route, or short description)."); return }
+    if (draft.dayIndex < 1 || draft.dayIndex > trip.totalDays) { setError(`Day must be 1–${trip.totalDays}.`); return }
+    const from = draft.fromLabel.trim()
+    const to = draft.toLabel.trim()
+    if ((from && !to) || (!from && to)) { setError("Fill in both From and To, or leave both empty."); return }
+    if (from && to && from.toLowerCase() === to.toLowerCase()) { setError("From and To cannot be the same."); return }
+    setError(null)
+
+    const now = new Date().toISOString()
+    const existing = editingId ? routes.find((r) => r.id === editingId) : undefined
+    const fare = Number(draft.fare)
+
+    const route: TransitRoute = {
+      id: editingId ?? crypto.randomUUID(),
+      tripId: trip.id,
+      dayIndex: draft.dayIndex,
+      fromLabel: from || title,
+      toLabel: to || title,
+      mode: draft.mode,
+      durationMinutes: 0,
+      estimatedCost: Number.isFinite(fare) && fare >= 0 ? fare : 0,
+      currency: draft.currency.trim() || "CAD",
+      provider: "manual",
+      notes: [title, draft.notes.trim()].filter(Boolean).join(" · ") || undefined,
+      referenceUrl: draft.referenceUrl.trim() || undefined,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    }
+
+    setSaving(true)
+    try {
+      await saveTripTransitRouteToSupabase(trip.id, route)
+      const next = sortRoutes(
+        editingId
+          ? routes.map((r) => (r.id === editingId ? route : r))
+          : [...routes, route],
+      )
+      syncStore(next)
+      toast.success(editingId ? "Updated" : "Saved")
+      setEditingId(null)
+      setShowLeg(false)
+      setDraft(buildEmptyDomesticDraft())
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  function handleEdit(route: TransitRoute) {
+    setError(null)
+    setEditingId(route.id)
+    const titlePart = route.notes?.split(" · ")[0] ?? ""
+    const notesPart = route.notes?.split(" · ").slice(1).join(" · ") ?? ""
+    const hasLeg = route.fromLabel !== route.toLabel
+    setShowLeg(hasLeg)
+    setDraft({
+      dayIndex: route.dayIndex,
+      title: titlePart,
+      mode: route.mode,
+      fare: route.estimatedCost > 0 ? String(route.estimatedCost) : "",
+      currency: route.currency || "CAD",
+      notes: notesPart,
+      referenceUrl: route.referenceUrl ?? "",
+      fromLabel: hasLeg ? route.fromLabel : "",
+      toLabel: hasLeg ? route.toLabel : "",
+    })
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      await deleteTripTransitRouteFromSupabase(trip.id, id)
+      syncStore(routes.filter((r) => r.id !== id))
+      toast.success("Removed")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete")
+    }
+  }
+
+  function handleCancel() {
+    setEditingId(null)
+    setError(null)
+    setShowLeg(false)
+    setDraft(buildEmptyDomesticDraft())
+  }
+
+  const field = (key: keyof DomesticDraft, value: string) =>
+    setDraft((prev) => ({ ...prev, [key]: value }))
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Transit</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          Jot down lines, fares, and tips you'll need on the go.
+        </CardContent>
+      </Card>
+
+      {/* ── Add / Edit form ── */}
+      <Card>
+        <CardHeader>
+          <CardTitle>{editingId ? "Edit" : "Quick add"}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {error ? (
+            <Alert variant="destructive">
+              <CircleAlertIcon className="size-4" />
+              <AlertTitle>Heads up</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>Title</Label>
+              <Input
+                value={draft.title}
+                onChange={(e) => field("title", e.target.value)}
+                placeholder="Line 1 Yonge-University, GO Train to Hamilton…"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Day</Label>
+              <Select
+                value={String(draft.dayIndex)}
+                onValueChange={(v) => setDraft((p) => ({ ...p, dayIndex: Number(v) }))}
+              >
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {dayOptions.map((d) => (
+                    <SelectItem key={d} value={String(d)}>Day {d} ({dayWeekdayMap[d]})</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="space-y-1.5">
+              <Label>Mode</Label>
+              <Select
+                value={draft.mode}
+                onValueChange={(v) => setDraft((p) => ({ ...p, mode: v as TransitMode }))}
+              >
+                <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {modeOptions.map((m) => (
+                    <SelectItem key={m} value={m}>{modeLabels[m]}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Fare</Label>
+              <Input type="number" min="0" step="0.01" value={draft.fare} onChange={(e) => field("fare", e.target.value)} placeholder="3.35" />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Currency</Label>
+              <Input value={draft.currency} onChange={(e) => field("currency", e.target.value.toUpperCase())} />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Notes</Label>
+            <Textarea
+              value={draft.notes}
+              onChange={(e) => field("notes", e.target.value)}
+              placeholder="Buy a day pass at the kiosk, tap PRESTO card, etc."
+              rows={2}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Link (optional)</Label>
+            <Input value={draft.referenceUrl} onChange={(e) => field("referenceUrl", e.target.value)} placeholder="https://..." />
+          </div>
+
+          {/* ── Optional leg detail ── */}
+          {showLeg ? (
+            <div className="space-y-3 rounded-md border border-dashed p-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium text-muted-foreground">Leg detail (optional)</p>
+                <Button variant="ghost" size="sm" onClick={() => { setShowLeg(false); setDraft((p) => ({ ...p, fromLabel: "", toLabel: "" })) }}>
+                  Remove
+                </Button>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>From</Label>
+                  <Input value={draft.fromLabel} onChange={(e) => field("fromLabel", e.target.value)} placeholder="Union Station" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>To</Label>
+                  <Input value={draft.toLabel} onChange={(e) => field("toLabel", e.target.value)} placeholder="Downtown" />
+                </div>
+              </div>
+            </div>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => setShowLeg(true)}>
+              + Add From → To leg
+            </Button>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : editingId ? "Update" : "Save"}</Button>
+            {editingId ? <Button variant="outline" onClick={handleCancel}>Cancel</Button> : null}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Saved entries ── */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Saved</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : routes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nothing yet — add your first note above.</p>
+          ) : (
+            <div className="space-y-4">
+              {Array.from(groupedRoutes.entries())
+                .sort((a, b) => a[0] - b[0])
+                .map(([day, dayRoutes]) => (
+                  <div key={day} className="space-y-2">
+                    <h4 className="text-sm font-medium">Day {day} ({dayWeekdayMap[day]})</h4>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {dayRoutes.map((route) => {
+                        const titlePart = route.notes?.split(" · ")[0] ?? ""
+                        const notesPart = route.notes?.split(" · ").slice(1).join(" · ") ?? ""
+                        const hasLeg = route.fromLabel !== route.toLabel
+                        return (
+                          <div key={route.id} className="flex flex-col gap-1.5 rounded-lg border p-3">
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="font-medium text-sm leading-snug">{titlePart || route.fromLabel}</p>
+                              <Badge variant="outline" className="shrink-0 text-[10px]">{modeLabels[route.mode]}</Badge>
+                            </div>
+                            {hasLeg ? (
+                              <p className="text-xs text-muted-foreground">{route.fromLabel} → {route.toLabel}</p>
+                            ) : null}
+                            {notesPart ? (
+                              <p className="text-xs text-muted-foreground line-clamp-2">{notesPart}</p>
+                            ) : null}
+                            {route.estimatedCost > 0 ? (
+                              <p className="text-xs font-medium tabular-nums">{formatMoney(route.estimatedCost, route.currency)}</p>
+                            ) : null}
+                            {route.referenceUrl ? (
+                              <a href={route.referenceUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-muted-foreground underline">
+                                <LinkIcon className="size-3" /> Link
+                              </a>
+                            ) : null}
+                            <div className="flex gap-1 pt-1">
+                              <Button variant="outline" size="sm" className="flex-1" onClick={() => handleEdit(route)}>
+                                <PencilIcon className="size-3" /> Edit
+                              </Button>
+                              <Button variant="outline" size="sm" className="flex-1 text-destructive hover:text-destructive" onClick={() => handleDelete(route.id)}>
+                                <Trash2Icon className="size-3" /> Delete
+                              </Button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                ))}
+            </div>
+          )}
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <RouteIcon className="size-4" />
+            Transit status updates automatically from this list.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * International Transit — full planner with provider suggestions + map
+ * ─────────────────────────────────────────────────────────────────────────── */
 
 function TransitPageBody({ trip }: { trip: Trip }) {
   const updateTrip = useUpdateTrip()
 
-  const routes = React.useMemo(() => sortRoutes(getTripTransitRoutes(trip)), [trip])
+  const [routes, setRoutes] = React.useState<TransitRoute[]>([])
+  const [routesLoaded, setRoutesLoaded] = React.useState(false)
+
+  React.useEffect(() => {
+    let cancelled = false
+    getTripTransitRoutesFromSupabase(trip.id).then((rows) => {
+      if (cancelled) return
+      const sorted = sortRoutes(rows)
+      setRoutes(sorted)
+      updateTrip(trip.id, { transitRoutes: sorted, transitSaved: sorted.length > 0 })
+      setRoutesLoaded(true)
+    })
+    return () => { cancelled = true }
+  }, [trip.id, updateTrip])
 
   const [dayIndex, setDayIndex] = React.useState<number>(1)
   const [fromLabel, setFromLabel] = React.useState("")
@@ -437,12 +825,10 @@ function TransitPageBody({ trip }: { trip: Trip }) {
     })
   }
 
-  function upsertRoutes(nextRoutes: TransitRoute[], toastMessage: string) {
-    updateTrip(trip.id, {
-      transitRoutes: nextRoutes,
-      transitSaved: nextRoutes.length > 0,
-    })
-    toast.success(toastMessage)
+  function syncStore(next: TransitRoute[]) {
+    const sorted = sortRoutes(next)
+    setRoutes(sorted)
+    updateTrip(trip.id, { transitRoutes: sorted, transitSaved: sorted.length > 0 })
   }
 
   async function handleFindSuggestions() {
@@ -578,7 +964,7 @@ function TransitPageBody({ trip }: { trip: Trip }) {
     return null
   }
 
-  function handleSaveManual() {
+  async function handleSaveManual() {
     const error = validateManualDraft(manualDraft)
     if (error) {
       setManualError(error)
@@ -615,16 +1001,21 @@ function TransitPageBody({ trip }: { trip: Trip }) {
       updatedAt: now,
     }
 
+    try {
+      await saveTripTransitRouteToSupabase(trip.id, normalizedRoute)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save route")
+      return
+    }
+
     const nextRoutes = editingRouteId
       ? routes.map((route) =>
           route.id === editingRouteId ? normalizedRoute : route
         )
       : [...routes, normalizedRoute]
 
-    upsertRoutes(
-      nextRoutes,
-      editingRouteId ? "Transit route updated" : "Transit route saved"
-    )
+    syncStore(nextRoutes)
+    toast.success(editingRouteId ? "Transit route updated" : "Transit route saved")
 
     setMapPreview({
       fromLabel: normalizedRoute.fromLabel,
@@ -646,7 +1037,7 @@ function TransitPageBody({ trip }: { trip: Trip }) {
     setArrivalByTime("")
   }
 
-  function handleSaveSelectedSuggestion() {
+  async function handleSaveSelectedSuggestion() {
     const selected = suggestions[selectedSuggestion]
     if (!selected) return
 
@@ -674,7 +1065,15 @@ function TransitPageBody({ trip }: { trip: Trip }) {
       updatedAt: new Date().toISOString(),
     }
 
-    upsertRoutes([...routes, immediateRoute], "Transit route saved")
+    try {
+      await saveTripTransitRouteToSupabase(trip.id, immediateRoute)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save route")
+      return
+    }
+
+    syncStore([...routes, immediateRoute])
+    toast.success("Transit route saved")
     setMapPreview({
       fromLabel: immediateRoute.fromLabel,
       toLabel: immediateRoute.toLabel,
@@ -722,9 +1121,16 @@ function TransitPageBody({ trip }: { trip: Trip }) {
     })
   }
 
-  function handleDeleteRoute(routeId: string) {
+  async function handleDeleteRoute(routeId: string) {
+    try {
+      await deleteTripTransitRouteFromSupabase(trip.id, routeId)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete route")
+      return
+    }
     const nextRoutes = routes.filter((route) => route.id !== routeId)
-    upsertRoutes(nextRoutes, "Transit route deleted")
+    syncStore(nextRoutes)
+    toast.success("Transit route deleted")
     setMapPreview((prev) => {
       if (!prev) return prev
       const deleted = routes.find((route) => route.id === routeId)
@@ -736,7 +1142,7 @@ function TransitPageBody({ trip }: { trip: Trip }) {
     })
   }
 
-  function handleImportFromText() {
+  async function handleImportFromText() {
     const parsed = parseRoutePairsFromText(bulkText)
     if (parsed.length === 0) {
       toast.error("No route pairs found. Use lines like Berlin - Dresden.")
@@ -750,13 +1156,13 @@ function TransitPageBody({ trip }: { trip: Trip }) {
       dayIndex,
       fromLabel: entry.fromLabel,
       toLabel: entry.toLabel,
-      mode: "other",
+      mode: "other" as TransitMode,
       durationMinutes: 60,
       departureTimeLocal: undefined,
       arrivalTimeLocal: undefined,
       estimatedCost: 0,
       currency: "USD",
-      provider: "manual",
+      provider: "manual" as const,
       providerRouteRef: undefined,
       referenceUrl: entry.referenceUrl,
       transfers: undefined,
@@ -766,7 +1172,17 @@ function TransitPageBody({ trip }: { trip: Trip }) {
       updatedAt: now,
     }))
 
-    upsertRoutes([...routes, ...importedRoutes], `Imported ${importedRoutes.length} transit route(s)`)
+    try {
+      await Promise.all(
+        importedRoutes.map((r) => saveTripTransitRouteToSupabase(trip.id, r)),
+      )
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to import routes")
+      return
+    }
+
+    syncStore([...routes, ...importedRoutes])
+    toast.success(`Imported ${importedRoutes.length} transit route(s)`)
     setBulkText("")
   }
 
@@ -1247,7 +1663,9 @@ function TransitPageBody({ trip }: { trip: Trip }) {
                 </div>
               </div>
 
-              {routes.length === 0 ? (
+              {!routesLoaded ? (
+                <p className="text-sm text-muted-foreground">Loading…</p>
+              ) : routes.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No saved transit routes yet.</p>
               ) : (
                 <div className="space-y-3">

@@ -16,6 +16,11 @@ import { toast } from "sonner"
 
 import { useTripItineraryActions } from "@/components/providers/trips-provider"
 import { useTripPage } from "@/components/trips/trip-shell"
+import {
+  deleteTripItineraryItemFromSupabase,
+  getTripItineraryFromSupabase,
+  saveTripItineraryBatchToSupabase,
+} from "@/lib/supabase-trip-itinerary"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -262,6 +267,18 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
 
   const persistedItems = React.useMemo(() => getTripItineraryItems(trip), [trip])
   const [draftItems, setDraftItems] = React.useState<TripItineraryItem[]>(persistedItems)
+  const [saving, setSaving] = React.useState(false)
+  const dbItemIdsRef = React.useRef<Set<string>>(new Set())
+
+  React.useEffect(() => {
+    let cancelled = false
+    getTripItineraryFromSupabase(trip.id).then((rows) => {
+      if (cancelled || rows.length === 0) return
+      dbItemIdsRef.current = new Set(rows.map((r) => r.id))
+      setTripItineraryItems(trip.id, rows)
+    })
+    return () => { cancelled = true }
+  }, [trip.id, setTripItineraryItems])
   const [calendarView, setCalendarView] = React.useState<View>(() => {
     const calendar = searchParams.get("calendar")
     if (calendar === "month") return Views.MONTH
@@ -533,7 +550,7 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
     toast.message("Item removed from draft.")
   }, [])
 
-  const handleSave = React.useCallback(() => {
+  const handleSave = React.useCallback(async () => {
     for (const item of draftItems) {
       const error = validateItineraryItemDraft(
         {
@@ -549,8 +566,25 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
       }
     }
 
-    setTripItineraryItems(trip.id, normalizeSortOrder(draftItems))
-    toast.success("Itinerary saved.")
+    const normalized = normalizeSortOrder(draftItems)
+    setSaving(true)
+    try {
+      const currentIds = new Set(normalized.map((i) => i.id))
+      const removedIds = [...dbItemIdsRef.current].filter((id) => !currentIds.has(id))
+
+      await Promise.all([
+        saveTripItineraryBatchToSupabase(trip.id, normalized),
+        ...removedIds.map((id) => deleteTripItineraryItemFromSupabase(trip.id, id)),
+      ])
+
+      dbItemIdsRef.current = currentIds
+      setTripItineraryItems(trip.id, normalized)
+      toast.success("Itinerary saved.")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save itinerary")
+    } finally {
+      setSaving(false)
+    }
   }, [draftItems, setTripItineraryItems, trip.id, trip.totalDays])
 
   const handleDiscard = React.useCallback(() => {
@@ -714,9 +748,9 @@ function ItineraryPageBody({ trip }: { trip: Trip }) {
               <Button variant="outline" size="sm" onClick={handleDiscard} disabled={!isDirty}>
                 Discard
               </Button>
-              <Button size="sm" onClick={handleSave} disabled={!isDirty}>
+              <Button size="sm" onClick={handleSave} disabled={!isDirty || saving}>
                 <SaveIcon />
-                Save Changes
+                {saving ? "Saving…" : "Save Changes"}
               </Button>
             </div>
           </div>

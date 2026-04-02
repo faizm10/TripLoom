@@ -28,7 +28,7 @@ const baseTripNavItems: TripNavItem[] = [
   { key: "flights", label: "Flights", hrefSuffix: "/flights", icon: PlaneIcon },
   {
     key: "buses-trains",
-    label: "Buses & trains",
+    label: "Buses & Trains",
     hrefSuffix: "/buses-trains",
     icon: TrainFrontIcon,
   },

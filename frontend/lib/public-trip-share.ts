@@ -52,12 +52,29 @@ export type PublicPackingShare = {
   sortOrder: number
 }
 
+export type PublicItineraryShare = {
+  id: string
+  dayIndex: number
+  timeBlock: string
+  status: string
+  category: string
+  title: string
+  locationLabel: string
+  startTimeLocal: string
+  endTimeLocal: string
+  notes: string
+  commuteDetails: string
+  locationLink: string
+  googleMapsLink: string
+}
+
 export type PublicTripSharePayload = {
   trip: Trip
   flights: PublicFlightShare[]
   groundTrips: PublicGroundShare[]
   hotels: PublicHotelShare[]
   groupPacking: PublicPackingShare[]
+  itinerary: PublicItineraryShare[]
 }
 
 function isLinkUsable(expiresAt: string | null, revokedAt: string | null): boolean {
@@ -100,7 +117,7 @@ export async function getPublicTripSharePayload(rawToken: string): Promise<Publi
 
   const trip = tripFromRow(tripRow as TripRow)
 
-  const [flightsRes, groundRes, hotelsRes, packingRes] = await Promise.all([
+  const [flightsRes, groundRes, hotelsRes, packingRes, itineraryRes] = await Promise.all([
     admin
       .from("trip_flights")
       .select(
@@ -125,6 +142,14 @@ export async function getPublicTripSharePayload(rawToken: string): Promise<Publi
       .select("id, label, is_checked, sort_order")
       .eq("trip_id", tripId)
       .is("user_id", null)
+      .order("sort_order", { ascending: true }),
+    admin
+      .from("itinerary_items")
+      .select(
+        "id, day_index, time_block, status, category, title, location_label, start_time_local, end_time_local, notes, commute_details, location_link, google_maps_link, sort_order"
+      )
+      .eq("trip_id", tripId)
+      .order("day_index", { ascending: true })
       .order("sort_order", { ascending: true }),
   ])
 
@@ -174,5 +199,21 @@ export async function getPublicTripSharePayload(rawToken: string): Promise<Publi
     sortOrder: Number(r.sort_order ?? 0),
   }))
 
-  return { trip, flights, groundTrips, hotels, groupPacking }
+  const itinerary: PublicItineraryShare[] = (itineraryRes.data ?? []).map((r: Record<string, unknown>) => ({
+    id: String(r.id),
+    dayIndex: Number(r.day_index ?? 1),
+    timeBlock: String(r.time_block ?? "morning"),
+    status: String(r.status ?? "planned"),
+    category: String(r.category ?? "activities"),
+    title: String(r.title ?? ""),
+    locationLabel: String(r.location_label ?? ""),
+    startTimeLocal: String(r.start_time_local ?? ""),
+    endTimeLocal: String(r.end_time_local ?? ""),
+    notes: String(r.notes ?? ""),
+    commuteDetails: String(r.commute_details ?? ""),
+    locationLink: String(r.location_link ?? ""),
+    googleMapsLink: String(r.google_maps_link ?? ""),
+  }))
+
+  return { trip, flights, groundTrips, hotels, groupPacking, itinerary }
 }

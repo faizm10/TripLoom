@@ -6,7 +6,10 @@ import { motion } from "framer-motion"
 import {
   ArrowRightIcon,
   BedDoubleIcon,
+  CalendarDaysIcon,
   CheckSquare2Icon,
+  ClockIcon,
+  ExternalLinkIcon,
   GlobeIcon,
   MapPinIcon,
   PackageIcon,
@@ -21,6 +24,7 @@ import type {
   PublicFlightShare,
   PublicGroundShare,
   PublicHotelShare,
+  PublicItineraryShare,
   PublicPackingShare,
   PublicTripSharePayload,
 } from "@/lib/public-trip-share"
@@ -287,6 +291,153 @@ function PackingCard({ tripId, items }: { tripId: string; items: PublicPackingSh
   )
 }
 
+const CATEGORY_STYLES: Record<string, string> = {
+  outbound_flight: "bg-blue-100 text-blue-900 dark:bg-blue-900/30 dark:text-blue-300",
+  inbound_flight: "bg-cyan-100 text-cyan-900 dark:bg-cyan-900/30 dark:text-cyan-300",
+  commute: "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-300",
+  activities: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+  games: "bg-violet-100 text-violet-900 dark:bg-violet-900/30 dark:text-violet-300",
+  food: "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-300",
+  sightseeing: "bg-rose-100 text-rose-900 dark:bg-rose-900/30 dark:text-rose-300",
+  shopping: "bg-fuchsia-100 text-fuchsia-900 dark:bg-fuchsia-900/30 dark:text-fuchsia-300",
+  rest: "bg-slate-100 text-slate-900 dark:bg-slate-900/30 dark:text-slate-300",
+  other: "bg-zinc-100 text-zinc-900 dark:bg-zinc-900/30 dark:text-zinc-300",
+}
+
+function categoryLabel(cat: string): string {
+  return cat.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function formatTime(t: string): string {
+  if (!t) return ""
+  try {
+    const d = new Date(t)
+    if (Number.isNaN(d.getTime())) return t
+    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+  } catch {
+    return t
+  }
+}
+
+function ItineraryDayGroup({
+  dayIndex,
+  items,
+  startDate,
+  delay,
+}: {
+  dayIndex: number
+  items: PublicItineraryShare[]
+  startDate: string
+  delay: number
+}) {
+  let dayLabel = `Day ${dayIndex}`
+  try {
+    const d = new Date(startDate + "T00:00:00")
+    d.setDate(d.getDate() + dayIndex - 1)
+    dayLabel = `Day ${dayIndex} · ${d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}`
+  } catch {
+    /* keep default */
+  }
+
+  return (
+    <motion.div
+      variants={fadeUp}
+      initial="hidden"
+      whileInView="visible"
+      viewport={{ once: true, margin: "-30px" }}
+      custom={delay}
+      className="space-y-3"
+    >
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {dayLabel}
+      </p>
+      <div className="space-y-2">
+        {items.map((item, idx) => (
+          <ItineraryItemCard key={item.id} item={item} idx={idx} />
+        ))}
+      </div>
+    </motion.div>
+  )
+}
+
+function ItineraryItemCard({ item, idx }: { item: PublicItineraryShare; idx: number }) {
+  const catStyle = CATEGORY_STYLES[item.category] ?? CATEGORY_STYLES.other
+  const timeRange =
+    item.startTimeLocal && item.endTimeLocal
+      ? `${formatTime(item.startTimeLocal)} – ${formatTime(item.endTimeLocal)}`
+      : null
+
+  return (
+    <motion.div
+      variants={fadeUp}
+      initial="hidden"
+      whileInView="visible"
+      viewport={{ once: true, margin: "-20px" }}
+      custom={idx * 0.04}
+      className="border border-border bg-card p-4 transition-colors hover:border-primary/20"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 space-y-1">
+          <p className="text-sm font-semibold text-foreground">{item.title}</p>
+          {item.locationLabel && (
+            <p className="flex items-center gap-1 text-xs text-muted-foreground">
+              <MapPinIcon className="size-3 shrink-0" />
+              {item.locationLabel}
+            </p>
+          )}
+        </div>
+        <Badge className={`shrink-0 text-[10px] ${catStyle}`}>
+          {categoryLabel(item.category)}
+        </Badge>
+      </div>
+
+      {timeRange && (
+        <p className="mt-2 flex items-center gap-1 text-xs text-muted-foreground">
+          <ClockIcon className="size-3 shrink-0" />
+          {timeRange}
+        </p>
+      )}
+
+      {item.commuteDetails && (
+        <p className="mt-1.5 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Getting there:</span> {item.commuteDetails}
+        </p>
+      )}
+
+      {item.notes && (
+        <p className="mt-1.5 text-xs italic text-muted-foreground">{item.notes}</p>
+      )}
+
+      {(item.locationLink || item.googleMapsLink) && (
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          {item.locationLink && (
+            <a
+              href={item.locationLink}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline"
+            >
+              <ExternalLinkIcon className="size-3" />
+              Location
+            </a>
+          )}
+          {item.googleMapsLink && (
+            <a
+              href={item.googleMapsLink}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline"
+            >
+              <MapPinIcon className="size-3" />
+              Google Maps
+            </a>
+          )}
+        </div>
+      )}
+    </motion.div>
+  )
+}
+
 const POLL_MS = 12_000
 
 function isPayload(v: unknown): v is PublicTripSharePayload {
@@ -300,7 +451,8 @@ function isPayload(v: unknown): v is PublicTripSharePayload {
     Array.isArray(o.flights) &&
     Array.isArray(o.groundTrips) &&
     Array.isArray(o.hotels) &&
-    Array.isArray(o.groupPacking)
+    Array.isArray(o.groupPacking) &&
+    Array.isArray(o.itinerary)
   )
 }
 
@@ -358,17 +510,29 @@ export function ShareTripView({
     }
   }, [refresh])
 
-  const { trip, flights, groundTrips, hotels, groupPacking } = data
+  const { trip, flights, groundTrips, hotels, groupPacking, itinerary } = data
 
   const hasFlights = flights.length > 0
   const hasGround = groundTrips.length > 0
   const hasHotels = hotels.length > 0
   const hasPacking = trip.isGroupTrip && groupPacking.length > 0
+  const hasItinerary = itinerary.length > 0
+
+  const itineraryByDay = React.useMemo(() => {
+    const map = new Map<number, PublicItineraryShare[]>()
+    for (const item of itinerary) {
+      const existing = map.get(item.dayIndex) ?? []
+      existing.push(item)
+      map.set(item.dayIndex, existing)
+    }
+    return [...map.entries()].sort(([a], [b]) => a - b)
+  }, [itinerary])
 
   const statItems = [
     { icon: PlaneIcon, count: flights.length, label: "Flights" },
     { icon: TrainFrontIcon, count: groundTrips.length, label: "Ground trips" },
     { icon: BedDoubleIcon, count: hotels.length, label: "Stays" },
+    { icon: CalendarDaysIcon, count: itinerary.length, label: "Activities" },
     { icon: PackageIcon, count: groupPacking.length, label: "Packing items" },
   ].filter((s) => s.count > 0)
 
@@ -538,6 +702,22 @@ export function ShareTripView({
                 <HotelCard key={h.id} h={h} idx={i} />
               ))}
             </div>
+          </section>
+        ) : null}
+
+        {/* Itinerary */}
+        {hasItinerary ? (
+          <section className="space-y-6">
+            <SectionHeading icon={CalendarDaysIcon} title="Itinerary" count={itinerary.length} delay={0} />
+            {itineraryByDay.map(([dayIndex, items], i) => (
+              <ItineraryDayGroup
+                key={dayIndex}
+                dayIndex={dayIndex}
+                items={items}
+                startDate={trip.startDate}
+                delay={i * 0.06}
+              />
+            ))}
           </section>
         ) : null}
 

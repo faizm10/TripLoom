@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function NotFound() {
   return (
     <div style={{
@@ -8,7 +10,9 @@ export default function NotFound() {
         <div style={{ fontSize: 64, letterSpacing: "-0.02em", color: "var(--ink)" }}>404</div>
         <div style={{ marginTop: 8, fontFamily: "var(--f-ui)", fontSize: 14 }}>
           Trip not found.{" "}
-          <a href="/trips" style={{ color: "var(--accent)", textDecoration: "underline" }}>Back to all trips</a>
+          <Link href="/trips" style={{ color: "var(--accent)", textDecoration: "underline" }}>
+            Back to all trips
+          </Link>
         </div>
       </div>
     </div>

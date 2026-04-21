@@ -1,8 +1,5 @@
-import { notFound } from "next/navigation";
-import { Workspace } from "@/components/Workspace";
-import { TRIP } from "@/lib/data";
+import { OverviewPageContent } from "@/components/trips/pages/overview-page-content"
 
-export default function Page({ params }: { params: { id: string } }) {
-  if (params.id !== TRIP.id) return notFound();
-  return <Workspace />;
+export default function TripOverviewPage() {
+  return <OverviewPageContent />
 }

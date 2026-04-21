@@ -1,0 +1,776 @@
+"use client"
+
+import * as React from "react"
+import type {
+  CreateTripInput,
+  Trip,
+  TripItineraryItem,
+  TripExpense,
+  TripFinance,
+  TripFinanceAutomation,
+} from "@/lib/trips"
+import {
+  createTripInSupabase,
+  deleteTripInSupabase,
+  getTripsFromSupabase,
+  tripOverviewPatchToPayload,
+  type UpdateTripPayload,
+  updateTripInSupabase,
+} from "@/lib/supabase-trips"
+import { createClient } from "@/lib/supabase/client"
+import { toast } from "sonner"
+import {
+  coerceTripItineraryForTotalDays as coerceItinerary,
+  computeItineraryDaysPlanned as computeDaysPlanned,
+  getDestinationTimezone,
+  getFinanceSummary,
+  getTripFinance,
+  getTripItineraryItems,
+  isFinanceComplete,
+  runFinanceGuardrails,
+} from "@/lib/trips"
+
+function normalizeTransit(trip: Trip): Trip {
+  const hasRoutes = Array.isArray(trip.transitRoutes)
+  return {
+    ...trip,
+    transitSaved: hasRoutes ? (trip.transitRoutes?.length ?? 0) > 0 : trip.transitSaved,
+  }
+}
+
+/** Overlay Supabase-backed overview fields; keep client-enriched state (itinerary, flights, finance, etc.). */
+function mergePersistedTripOverview(client: Trip, fromServer: Trip): Trip {
+  const totalDaysChanged = client.totalDays !== fromServer.totalDays
+  let merged: Trip = {
+    ...client,
+    destination: fromServer.destination,
+    startDate: fromServer.startDate,
+    endDate: fromServer.endDate,
+    timezone: fromServer.timezone,
+    travelers: fromServer.travelers,
+    isGroupTrip: fromServer.isGroupTrip,
+    totalDays: fromServer.totalDays,
+    lastUpdated: fromServer.lastUpdated,
+    travelScope: fromServer.travelScope ?? client.travelScope,
+  }
+  if (totalDaysChanged && Array.isArray(merged.itineraryItems) && merged.itineraryItems.length > 0) {
+    const items = coerceItinerary({
+      ...merged,
+      itineraryItems: merged.itineraryItems,
+    })
+    merged = {
+      ...merged,
+      itineraryItems: items,
+      itineraryDaysPlanned: computeDaysPlanned(items),
+    }
+  }
+  return normalizeTransit(merged)
+}
+
+function serverOverviewMatches(client: Trip, fromServer: Trip): boolean {
+  return (
+    client.destination === fromServer.destination &&
+    client.startDate === fromServer.startDate &&
+    client.endDate === fromServer.endDate &&
+    (client.timezone ?? "") === (fromServer.timezone ?? "") &&
+    client.travelers === fromServer.travelers &&
+    client.isGroupTrip === fromServer.isGroupTrip &&
+    client.totalDays === fromServer.totalDays &&
+    client.lastUpdated === fromServer.lastUpdated &&
+    (client.travelScope ?? "international") === (fromServer.travelScope ?? "international")
+  )
+}
+
+/** Patches from trip-layout transport → itinerary sync only; must not bump lastUpdated or SSR merge fights the client in a loop. */
+const TRANSPORT_ENRICHMENT_KEYS = new Set([
+  "selectedFlights",
+  "selectedGroundTransport",
+  "selectedHotel",
+  "flightSummary",
+  "groundTransportSummary",
+  "hotelSummary",
+  "hotelArea",
+  "hotelNightsBooked",
+  "itineraryItems",
+  "itineraryDaysPlanned",
+])
+
+function isTransportEnrichmentOnly(partial: Partial<Trip>): boolean {
+  const keys = Object.keys(partial)
+  if (keys.length === 0) return false
+  return keys.every((k) => TRANSPORT_ENRICHMENT_KEYS.has(k))
+}
+
+function applyTripPatch(trip: Trip, partial: Partial<Trip>): Trip {
+  const merged: Trip = {
+    ...trip,
+    ...partial,
+    lastUpdated: isTransportEnrichmentOnly(partial)
+      ? trip.lastUpdated
+      : new Date().toISOString().slice(0, 10),
+  }
+  if (partial.itineraryItems !== undefined) {
+    merged.itineraryItems = coerceItinerary({
+      ...merged,
+      itineraryItems: partial.itineraryItems,
+    })
+    merged.itineraryDaysPlanned = computeDaysPlanned(merged.itineraryItems)
+  } else if (typeof partial.totalDays === "number" && Array.isArray(merged.itineraryItems)) {
+    merged.itineraryItems = coerceItinerary({
+      ...merged,
+      itineraryItems: merged.itineraryItems,
+    })
+    merged.itineraryDaysPlanned = computeDaysPlanned(merged.itineraryItems)
+  }
+  return normalizeTransit(merged)
+}
+
+type TripsContextValue = {
+  trips: Trip[]
+  getTripById: (id: string) => Trip | undefined
+  createTrip: (input: CreateTripInput) => Trip
+  deleteTrip: (id: string) => Promise<void>
+  updateTrip: (id: string, partial: Partial<Trip>) => void
+  ensureTripInStore: (trip: Trip) => void
+  setTripItineraryItems: (id: string, items: TripItineraryItem[]) => void
+  addTripItineraryItem: (id: string, item: TripItineraryItem) => void
+  updateTripItineraryItem: (
+    id: string,
+    itemId: string,
+    patch: Partial<TripItineraryItem>
+  ) => void
+  deleteTripItineraryItem: (id: string, itemId: string) => void
+  setTripBudget: (id: string, budgetTotal: number, currency: string) => void
+  addTripExpense: (id: string, expense: TripExpense) => void
+  updateTripExpense: (id: string, expenseId: string, patch: Partial<TripExpense>) => void
+  deleteTripExpense: (id: string, expenseId: string) => void
+  updateFinanceAutomation: (
+    id: string,
+    patch: Partial<TripFinanceAutomation>
+  ) => void
+  updateFinanceSettings: (
+    id: string,
+    patch: Partial<
+      Pick<TripFinance, "currency" | "groupModeEnabled" | "groupSize" | "exchangeRates">
+    >
+  ) => void
+  runFinanceAutomationCheck: (id: string) => void
+}
+
+const TripsContext = React.createContext<TripsContextValue | null>(null)
+
+export function TripsProvider({ children }: { children: React.ReactNode }) {
+  const [trips, setTrips] = React.useState<Trip[]>([])
+  const [tripsLoaded, setTripsLoaded] = React.useState(false)
+  const fetchGenerationRef = React.useRef(0)
+
+  const fetchTrips = React.useCallback(() => {
+    const gen = ++fetchGenerationRef.current
+    getTripsFromSupabase()
+      .then((list) => {
+        if (gen !== fetchGenerationRef.current) return
+        setTrips((prev) => {
+          const prevById = new Map(prev.map((t) => [t.id, t]))
+          return list.map((row) => {
+            const serverTrip = normalizeTransit(row)
+            const existing = prevById.get(serverTrip.id)
+            if (existing) {
+              prevById.delete(serverTrip.id)
+              return mergePersistedTripOverview(existing, serverTrip)
+            }
+            return serverTrip
+          })
+        })
+      })
+      .catch(() => {
+        if (gen !== fetchGenerationRef.current) return
+        toast.error("Could not load trips from cloud.")
+      })
+      .finally(() => {
+        if (gen === fetchGenerationRef.current) setTripsLoaded(true)
+      })
+  }, [])
+
+  React.useEffect(() => {
+    fetchTrips()
+  }, [fetchTrips])
+
+  React.useEffect(() => {
+    const supabase = createClient()
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(() => {
+      fetchTrips()
+    })
+    return () => subscription.unsubscribe()
+  }, [fetchTrips])
+
+  const getTripById = React.useCallback(
+    (id: string) => trips.find((t) => t.id === id),
+    [trips]
+  )
+
+  const createTrip = React.useCallback((input: CreateTripInput): Trip => {
+    const today = new Date()
+    const start = new Date(
+      Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
+    )
+
+    if (input.dateMode === "weekend") {
+      const day = start.getUTCDay()
+      const offset = ((6 - day) + 7) % 7 || 7
+      start.setUTCDate(start.getUTCDate() + offset)
+    } else if (input.dateMode === "exact") {
+      start.setUTCDate(start.getUTCDate() + 30)
+    } else {
+      start.setUTCDate(start.getUTCDate() + 45)
+    }
+
+    const totalDays = input.dateMode === "weekend" ? 3 : input.dateMode === "flexible" ? 10 : 7
+    const end = new Date(start)
+    end.setUTCDate(start.getUTCDate() + Math.max(1, totalDays - 1))
+
+    const next: Trip = {
+      id: input.id,
+      destination: input.destination,
+      timezone: getDestinationTimezone(input.destination),
+      startDate: start.toISOString().slice(0, 10),
+      endDate: end.toISOString().slice(0, 10),
+      travelers: input.travelers === "group" ? 2 : 1,
+      isGroupTrip: input.travelers === "group",
+      status: "planning",
+      lastUpdated: new Date().toISOString().slice(0, 10),
+      progress: 0,
+      travelScope: input.travelScope,
+      selectedFlights: false,
+      selectedGroundTransport: false,
+      selectedHotel: false,
+      itineraryDaysPlanned: 0,
+      itineraryItems: [],
+      totalDays,
+      transitSaved: false,
+      transitRoutes: [],
+      financeSet: false,
+      approvalsPending: 0,
+      budgetTotal: 0,
+      perPerson: 0,
+      activities: ["Trip created"],
+    }
+
+    setTrips((prev) => [next, ...prev.filter((trip) => trip.id !== next.id)])
+    createTripInSupabase({
+      id: next.id,
+      destination: next.destination,
+      startDate: next.startDate,
+      endDate: next.endDate,
+      timezone: next.timezone ?? "UTC",
+      travelers: next.travelers,
+      isGroupTrip: next.isGroupTrip,
+      totalDays: next.totalDays,
+      travelScope: next.travelScope ?? "international",
+    }).catch((e) => {
+      toast.error("Could not save trip to cloud.", {
+        description: e instanceof Error ? e.message : undefined,
+      })
+      fetchTrips()
+    })
+    return next
+  }, [fetchTrips])
+
+  const ensureTripInStore = React.useCallback((trip: Trip) => {
+    setTrips((prev) => {
+      const idx = prev.findIndex((t) => t.id === trip.id)
+      const serverTrip = normalizeTransit(trip)
+      if (idx === -1) {
+        return [serverTrip, ...prev]
+      }
+      const current = prev[idx]
+      if (serverOverviewMatches(current, serverTrip)) {
+        return prev
+      }
+      const merged = mergePersistedTripOverview(current, serverTrip)
+      return prev.map((t, i) => (i === idx ? merged : t))
+    })
+  }, [])
+
+  const updateTrip = React.useCallback(
+    (id: string, partial: Partial<Trip>) => {
+      const shouldPersistToDb =
+        "destination" in partial ||
+        "startDate" in partial ||
+        "endDate" in partial ||
+        "timezone" in partial ||
+        "travelers" in partial ||
+        "isGroupTrip" in partial ||
+        "totalDays" in partial ||
+        "travelScope" in partial
+
+      const persistOverview = (payload: UpdateTripPayload) => {
+        if (Object.keys(payload).length === 0) return
+        queueMicrotask(() => {
+          void updateTripInSupabase(id, payload)
+            .then(() => {
+              fetchTrips()
+            })
+            .catch((e) => {
+              toast.error("Could not update trip in cloud.", {
+                description: e instanceof Error ? e.message : undefined,
+              })
+            })
+        })
+      }
+
+      setTrips((prev) => {
+        const idx = prev.findIndex((t) => t.id === id)
+        if (idx === -1) {
+          if (shouldPersistToDb) {
+            const payload = tripOverviewPatchToPayload(partial)
+            persistOverview(payload)
+          }
+          // Trip shell already has SSR `serverTrip` from Supabase; list syncs on fetchTrips
+          // after persist. No placeholder rows.
+          return prev
+        }
+
+        const next = applyTripPatch(prev[idx], partial)
+
+        if (shouldPersistToDb) {
+          persistOverview({
+            destination: next.destination,
+            startDate: next.startDate,
+            endDate: next.endDate,
+            timezone: next.timezone ?? undefined,
+            travelers: next.travelers,
+            isGroupTrip: next.isGroupTrip,
+            totalDays: next.totalDays,
+            travelScope: next.travelScope,
+          })
+        }
+
+        return prev.map((t, i) => (i === idx ? next : t))
+      })
+    },
+    [fetchTrips]
+  )
+
+  const setTripItineraryItems = React.useCallback((id: string, items: TripItineraryItem[]) => {
+    setTrips((prev) =>
+      prev.map((trip) => {
+        if (trip.id !== id) return trip
+        const normalized = coerceItinerary({ ...trip, itineraryItems: items })
+        return {
+          ...trip,
+          itineraryItems: normalized,
+          itineraryDaysPlanned: computeDaysPlanned(normalized),
+          lastUpdated: new Date().toISOString().slice(0, 10),
+        }
+      })
+    )
+  }, [])
+
+  const addTripItineraryItem = React.useCallback((id: string, item: TripItineraryItem) => {
+    setTrips((prev) =>
+      prev.map((trip) => {
+        if (trip.id !== id) return trip
+        const next = getTripItineraryItems({
+          ...trip,
+          itineraryItems: [...(trip.itineraryItems ?? []), item],
+        })
+        return {
+          ...trip,
+          itineraryItems: next,
+          itineraryDaysPlanned: computeDaysPlanned(next),
+          lastUpdated: new Date().toISOString().slice(0, 10),
+        }
+      })
+    )
+  }, [])
+
+  const updateTripItineraryItem = React.useCallback(
+    (id: string, itemId: string, patch: Partial<TripItineraryItem>) => {
+      setTrips((prev) =>
+        prev.map((trip) => {
+          if (trip.id !== id) return trip
+          const next = getTripItineraryItems({
+            ...trip,
+            itineraryItems: (trip.itineraryItems ?? []).map((item) =>
+              item.id === itemId
+                ? {
+                    ...item,
+                    ...patch,
+                    id: item.id,
+                    tripId: item.tripId,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : item
+            ),
+          })
+          return {
+            ...trip,
+            itineraryItems: next,
+            itineraryDaysPlanned: computeDaysPlanned(next),
+            lastUpdated: new Date().toISOString().slice(0, 10),
+          }
+        })
+      )
+    },
+    []
+  )
+
+  const deleteTripItineraryItem = React.useCallback((id: string, itemId: string) => {
+    setTrips((prev) =>
+      prev.map((trip) => {
+        if (trip.id !== id) return trip
+        const next = getTripItineraryItems({
+          ...trip,
+          itineraryItems: (trip.itineraryItems ?? []).filter((item) => item.id !== itemId),
+        })
+        return {
+          ...trip,
+          itineraryItems: next,
+          itineraryDaysPlanned: computeDaysPlanned(next),
+          lastUpdated: new Date().toISOString().slice(0, 10),
+        }
+      })
+    )
+  }, [])
+
+  const deleteTrip = React.useCallback(
+    async (id: string) => {
+      try {
+        await deleteTripInSupabase(id)
+        setTrips((prev) => {
+          const removed = prev.find((trip) => trip.id === id)
+          const next = prev.filter((trip) => trip.id !== id)
+          queueMicrotask(() => {
+            toast.success(
+              removed ? `${removed.destination} deleted` : "Trip deleted"
+            )
+          })
+          return next
+        })
+      } catch (e) {
+        toast.error("Could not delete trip from cloud.", {
+          description: e instanceof Error ? e.message : undefined,
+        })
+        fetchTrips()
+      }
+    },
+    [fetchTrips]
+  )
+
+  const withFinanceMirrors = React.useCallback((trip: Trip, finance: TripFinance): Trip => {
+    const summary = getFinanceSummary({ ...trip, finance })
+    return {
+      ...trip,
+      finance,
+      budgetTotal: finance.budgetTotal,
+      perPerson: summary.perPersonEstimate,
+      financeSet: isFinanceComplete({ ...trip, finance }),
+    }
+  }, [])
+
+  const maybeRunFinanceAutomation = React.useCallback((trip: Trip, finance: TripFinance): TripFinance => {
+    if (!finance.automation.enabled) return finance
+    const guardrail = runFinanceGuardrails({ ...trip, finance })
+    return {
+      ...finance,
+      automation: {
+        ...finance.automation,
+        lastRunAt: new Date().toISOString(),
+        lastStatus: guardrail.status,
+      },
+    }
+  }, [])
+
+  const updateTripFinance = React.useCallback(
+    (
+      id: string,
+      updater: (trip: Trip, current: TripFinance) => TripFinance,
+      options?: { runAutomation?: boolean }
+    ) => {
+      const shouldRunAutomation = options?.runAutomation ?? true
+      setTrips((prev) =>
+        prev.map((trip) => {
+          if (trip.id !== id) return trip
+          const current = getTripFinance(trip)
+          let nextFinance = updater(trip, current)
+          if (shouldRunAutomation) {
+            nextFinance = maybeRunFinanceAutomation(trip, nextFinance)
+          }
+          const mirrored = withFinanceMirrors(trip, nextFinance)
+          return {
+            ...mirrored,
+            lastUpdated: new Date().toISOString().slice(0, 10),
+          }
+        })
+      )
+    },
+    [maybeRunFinanceAutomation, withFinanceMirrors]
+  )
+
+  const setTripBudget = React.useCallback(
+    (id: string, budgetTotal: number, currency: string) => {
+      const baseCurrency = (currency || "CAD").toUpperCase()
+      updateTripFinance(id, (_trip, finance) => ({
+        ...finance,
+        budgetTotal: Math.max(0, budgetTotal),
+        currency: baseCurrency,
+        exchangeRates: {
+          ...finance.exchangeRates,
+          [baseCurrency]: 1,
+        },
+      }))
+    },
+    [updateTripFinance]
+  )
+
+  const addTripExpense = React.useCallback(
+    (id: string, expense: TripExpense) => {
+      updateTripFinance(id, (_trip, finance) => ({
+        ...finance,
+        expenses: [...finance.expenses, expense],
+      }))
+    },
+    [updateTripFinance]
+  )
+
+  const updateTripExpense = React.useCallback(
+    (id: string, expenseId: string, patch: Partial<TripExpense>) => {
+      updateTripFinance(id, (_trip, finance) => ({
+        ...finance,
+        expenses: finance.expenses.map((expense) =>
+          expense.id === expenseId
+            ? {
+                ...expense,
+                ...patch,
+                id: expense.id,
+                tripId: expense.tripId,
+                updatedAt: new Date().toISOString(),
+              }
+            : expense
+        ),
+      }))
+    },
+    [updateTripFinance]
+  )
+
+  const deleteTripExpense = React.useCallback(
+    (id: string, expenseId: string) => {
+      updateTripFinance(id, (_trip, finance) => ({
+        ...finance,
+        expenses: finance.expenses.filter((expense) => expense.id !== expenseId),
+      }))
+    },
+    [updateTripFinance]
+  )
+
+  const updateFinanceAutomation = React.useCallback(
+    (id: string, patch: Partial<TripFinanceAutomation>) => {
+      updateTripFinance(
+        id,
+        (_trip, finance) => ({
+          ...finance,
+          automation: {
+            ...finance.automation,
+            ...patch,
+          },
+        }),
+        { runAutomation: false }
+      )
+    },
+    [updateTripFinance]
+  )
+
+  const updateFinanceSettings = React.useCallback(
+    (
+      id: string,
+      patch: Partial<
+        Pick<TripFinance, "currency" | "groupModeEnabled" | "groupSize" | "exchangeRates">
+      >
+    ) => {
+      updateTripFinance(
+        id,
+        (_trip, finance) => ({
+          ...finance,
+          ...patch,
+          currency: (patch.currency || finance.currency || "CAD").toUpperCase(),
+          groupSize:
+            patch.groupSize !== undefined
+              ? Math.max(1, Math.floor(patch.groupSize))
+              : finance.groupSize,
+          exchangeRates: {
+            ...finance.exchangeRates,
+            ...(patch.exchangeRates || {}),
+            [(patch.currency || finance.currency || "CAD").toUpperCase()]: 1,
+          },
+        }),
+        { runAutomation: false }
+      )
+    },
+    [updateTripFinance]
+  )
+
+  const runFinanceAutomationCheck = React.useCallback(
+    (id: string) => {
+      updateTripFinance(
+        id,
+        (_trip, finance) => ({
+          ...finance,
+        }),
+        { runAutomation: true }
+      )
+    },
+    [updateTripFinance]
+  )
+
+  const value = React.useMemo(
+    () => ({
+      trips,
+      getTripById,
+      createTrip,
+      deleteTrip,
+      updateTrip,
+      ensureTripInStore,
+      setTripItineraryItems,
+      addTripItineraryItem,
+      updateTripItineraryItem,
+      deleteTripItineraryItem,
+      setTripBudget,
+      addTripExpense,
+      updateTripExpense,
+      deleteTripExpense,
+      updateFinanceAutomation,
+      updateFinanceSettings,
+      runFinanceAutomationCheck,
+    }),
+    [
+      trips,
+      getTripById,
+      createTrip,
+      deleteTrip,
+      updateTrip,
+      ensureTripInStore,
+      setTripItineraryItems,
+      addTripItineraryItem,
+      updateTripItineraryItem,
+      deleteTripItineraryItem,
+      setTripBudget,
+      addTripExpense,
+      updateTripExpense,
+      deleteTripExpense,
+      updateFinanceAutomation,
+      updateFinanceSettings,
+      runFinanceAutomationCheck,
+    ]
+  )
+
+  return (
+    <TripsContext.Provider value={value}>{children}</TripsContext.Provider>
+  )
+}
+
+export function useTrips(): Trip[] {
+  const ctx = React.useContext(TripsContext)
+  if (!ctx) return []
+  return ctx.trips
+}
+
+export function useCreateTrip(): (input: CreateTripInput) => Trip {
+  const ctx = React.useContext(TripsContext)
+  return ctx?.createTrip ?? ((input: CreateTripInput) => ({
+    id: input.id,
+    destination: input.destination,
+    timezone: "UTC",
+    startDate: new Date().toISOString().slice(0, 10),
+    endDate: new Date().toISOString().slice(0, 10),
+    travelers: input.travelers === "group" ? 2 : 1,
+    isGroupTrip: input.travelers === "group",
+    status: "planning",
+    lastUpdated: new Date().toISOString().slice(0, 10),
+    progress: 0,
+    travelScope: input.travelScope ?? "international",
+    selectedFlights: false,
+    selectedGroundTransport: false,
+    selectedHotel: false,
+    itineraryDaysPlanned: 0,
+    itineraryItems: [],
+    totalDays: 1,
+    transitSaved: false,
+    transitRoutes: [],
+    financeSet: false,
+    approvalsPending: 0,
+    budgetTotal: 0,
+    perPerson: 0,
+    activities: [],
+  }))
+}
+
+export function useDeleteTrip(): (id: string) => Promise<void> {
+  const ctx = React.useContext(TripsContext)
+  return ctx?.deleteTrip ?? (async () => {})
+}
+
+export function useTrip(
+  tripId: string,
+  initialTrip: Trip | undefined
+): Trip | undefined {
+  const ctx = React.useContext(TripsContext)
+  const fromStore = ctx?.getTripById(tripId)
+  return fromStore ?? initialTrip
+}
+
+export function useUpdateTrip(): (id: string, partial: Partial<Trip>) => void {
+  const ctx = React.useContext(TripsContext)
+  return ctx?.updateTrip ?? (() => {})
+}
+
+export function useEnsureTripInStore(): (trip: Trip) => void {
+  const ctx = React.useContext(TripsContext)
+  return ctx?.ensureTripInStore ?? (() => {})
+}
+
+export function useTripItineraryActions(): {
+  setTripItineraryItems: (id: string, items: TripItineraryItem[]) => void
+  addTripItineraryItem: (id: string, item: TripItineraryItem) => void
+  updateTripItineraryItem: (
+    id: string,
+    itemId: string,
+    patch: Partial<TripItineraryItem>
+  ) => void
+  deleteTripItineraryItem: (id: string, itemId: string) => void
+} {
+  const ctx = React.useContext(TripsContext)
+  return {
+    setTripItineraryItems: ctx?.setTripItineraryItems ?? (() => {}),
+    addTripItineraryItem: ctx?.addTripItineraryItem ?? (() => {}),
+    updateTripItineraryItem: ctx?.updateTripItineraryItem ?? (() => {}),
+    deleteTripItineraryItem: ctx?.deleteTripItineraryItem ?? (() => {}),
+  }
+}
+
+export function useTripFinanceActions(): {
+  setTripBudget: (id: string, budgetTotal: number, currency: string) => void
+  addTripExpense: (id: string, expense: TripExpense) => void
+  updateTripExpense: (id: string, expenseId: string, patch: Partial<TripExpense>) => void
+  deleteTripExpense: (id: string, expenseId: string) => void
+  updateFinanceAutomation: (id: string, patch: Partial<TripFinanceAutomation>) => void
+  updateFinanceSettings: (
+    id: string,
+    patch: Partial<
+      Pick<TripFinance, "currency" | "groupModeEnabled" | "groupSize" | "exchangeRates">
+    >
+  ) => void
+  runFinanceAutomationCheck: (id: string) => void
+} {
+  const ctx = React.useContext(TripsContext)
+  return {
+    setTripBudget: ctx?.setTripBudget ?? (() => {}),
+    addTripExpense: ctx?.addTripExpense ?? (() => {}),
+    updateTripExpense: ctx?.updateTripExpense ?? (() => {}),
+    deleteTripExpense: ctx?.deleteTripExpense ?? (() => {}),
+    updateFinanceAutomation: ctx?.updateFinanceAutomation ?? (() => {}),
+    updateFinanceSettings: ctx?.updateFinanceSettings ?? (() => {}),
+    runFinanceAutomationCheck: ctx?.runFinanceAutomationCheck ?? (() => {}),
+  }
+}

@@ -1,5 +1,6 @@
 "use client";
 import React from "react";
+import Link from "next/link";
 import { Brand } from "./Shared";
 import { Icon, KIND_ICON } from "./Icon";
 import { TRIP, DAYS, PLACES } from "@/lib/data";
@@ -11,7 +12,7 @@ const s: Record<string, React.CSSProperties> = {
   navLinks: { display: "flex", gap: 28, color: "var(--ink-2)", fontSize: 13 },
   hero: { padding: "96px 48px 64px", maxWidth: 1280, margin: "0 auto", position: "relative" },
   badge: { display: "inline-flex", alignItems: "center", gap: 8, padding: "4px 10px 4px 6px", borderRadius: 999, background: "var(--card)", boxShadow: "inset 0 0 0 1px var(--hair)", fontSize: 12, color: "var(--ink-2)", marginBottom: 28, whiteSpace: "nowrap" },
-  headline: { fontFamily: "var(--f-display)", fontSize: 92, lineHeight: 1.02, letterSpacing: "-0.025em", color: "var(--ink)", margin: 0, maxWidth: 1080, textWrap: "balance" as any },
+  headline: { fontFamily: "var(--f-display)", fontSize: 92, lineHeight: 1.02, letterSpacing: "-0.025em", color: "var(--ink)", margin: 0, maxWidth: 1080, textWrap: "balance" as React.CSSProperties["textWrap"] },
   sub: { marginTop: 36, maxWidth: 560, fontSize: 17, lineHeight: 1.55, color: "var(--ink-2)" },
   ctaRow: { display: "flex", gap: 12, marginTop: 36, alignItems: "center" },
   proof: { marginTop: 72, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 32, paddingTop: 32, borderTop: "1px solid var(--hair)" },
@@ -136,7 +137,7 @@ export const Landing: React.FC<{ onEnter: () => void }> = ({ onEnter }) => (
         <a>Product</a><a>Templates</a><a>Pricing</a><a>Changelog</a>
       </div>
       <div style={{ display: "flex", gap: 10 }}>
-        <button className="btn ghost">Sign in</button>
+        <Link href="/auth/login" className="btn ghost">Sign in</Link>
         <button className="btn primary" onClick={onEnter}>Start planning</button>
       </div>
     </nav>
@@ -159,7 +160,7 @@ export const Landing: React.FC<{ onEnter: () => void }> = ({ onEnter }) => (
         </h1>
         <p style={s.sub}>
           TripLoom is a single, structured workspace for every part of a trip — the timeline,
-          the bookings, the places, and the people you're going with. No more pasting between
+          the bookings, the places, and the people you&apos;re going with. No more pasting between
           Docs, Maps, and Notes.
         </p>
         <div style={s.ctaRow}>
@@ -178,7 +179,7 @@ export const Landing: React.FC<{ onEnter: () => void }> = ({ onEnter }) => (
           </div>
           <div style={s.proofItem}>
             <div style={s.proofNum}>live</div>
-            multi-user editing with ambient presence — see where everyone's looking without chat noise.
+            multi-user editing with ambient presence — see where everyone&apos;s looking without chat noise.
           </div>
           <div style={s.proofItem}>
             <div style={s.proofNum}>calm</div>
@@ -212,7 +213,7 @@ export const Landing: React.FC<{ onEnter: () => void }> = ({ onEnter }) => (
       <div style={s.valueCell}>
         <Icon name="share" size={22} style={{ color: "var(--ink-3)" }} />
         <div style={s.valueTitle}>Plan together, quietly.</div>
-        <p style={s.valueBody}>Ambient presence shows who's viewing what. No cursor storms, no notification pile. Just the same page — actually.</p>
+        <p style={s.valueBody}>Ambient presence shows who&apos;s viewing what. No cursor storms, no notification pile. Just the same page — actually.</p>
       </div>
     </section>
 
@@ -222,7 +223,7 @@ export const Landing: React.FC<{ onEnter: () => void }> = ({ onEnter }) => (
       <div style={s.pillarK}>Principle 02</div>
       <div style={s.pillarV}>Every object — a day, a flight, a dinner — is the same shape, so you can move it, link it, and share it.</div>
       <div style={s.pillarK}>Principle 03</div>
-      <div style={s.pillarV}>The UI shouldn't yell. A trip is supposed to be the fun part; the tool should stay out of the way.</div>
+      <div style={s.pillarV}>The UI shouldn&apos;t yell. A trip is supposed to be the fun part; the tool should stay out of the way.</div>
     </section>
 
     <footer style={s.foot}>

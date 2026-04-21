@@ -1208,7 +1208,7 @@ export function ShareTripView({
               letterSpacing: "-0.025em",
               margin: "24px 0 0",
               color: "var(--ink)",
-              textWrap: "balance" as any,
+              textWrap: "balance" as React.CSSProperties["textWrap"],
               maxWidth: 1100,
             }}
           >
@@ -1432,7 +1432,7 @@ export function ShareTripView({
                 lineHeight: 1.05,
                 margin: "12px 0 10px",
                 color: "var(--ink)",
-                textWrap: "balance" as any,
+                textWrap: "balance" as React.CSSProperties["textWrap"],
               }}
             >
               Want to plan together, not over email?

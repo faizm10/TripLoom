@@ -1039,7 +1039,7 @@ function TransitPageBody({ trip }: { trip: Trip }) {
         <h1 style={{
           fontFamily: "var(--f-display)", fontSize: 64, letterSpacing: "-0.025em",
           lineHeight: 1.02, margin: "16px 0 0", color: "var(--ink)",
-          textWrap: "balance" as any, maxWidth: 900,
+          textWrap: "balance" as React.CSSProperties["textWrap"], maxWidth: 900,
         }}>
           A→B, day by day.
           <span style={{ fontStyle: "italic", color: "var(--accent-ink)" }}> Mapped.</span>

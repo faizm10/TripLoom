@@ -1,3 +1,5 @@
+import { formatMonthDayYear, formatMonthDayYearRange } from "@/lib/date-display"
+
 export type TripStatus = "planning" | "booked" | "in_progress"
 
 export type ExpenseCategory =
@@ -948,30 +950,15 @@ export function getMissingChecklist(trip: Trip): string[] {
 }
 
 export function getDateRangeLabel(trip: Trip): string {
-  return `${formatHumanDate(trip.startDate)} to ${formatHumanDate(trip.endDate)}`
+  return formatMonthDayYearRange(trip.startDate, trip.endDate)
 }
 
 function parseDateUtc(date: string): Date {
   return new Date(`${date}T00:00:00.000Z`)
 }
 
-function getOrdinalSuffix(day: number): string {
-  const mod10 = day % 10
-  const mod100 = day % 100
-  if (mod100 >= 11 && mod100 <= 13) return "th"
-  if (mod10 === 1) return "st"
-  if (mod10 === 2) return "nd"
-  if (mod10 === 3) return "rd"
-  return "th"
-}
-
 function formatHumanDate(isoDate: string): string {
-  const parsed = parseDateUtc(isoDate)
-  if (Number.isNaN(parsed.getTime())) return isoDate
-  const month = parsed.toLocaleString("en-US", { month: "short", timeZone: "UTC" })
-  const day = parsed.getUTCDate()
-  const year = parsed.getUTCFullYear()
-  return `${month} ${day}${getOrdinalSuffix(day)} ${year}`
+  return formatMonthDayYear(isoDate)
 }
 
 function startOfUtcDay(date: Date): Date {

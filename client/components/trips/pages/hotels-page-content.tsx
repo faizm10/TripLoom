@@ -19,6 +19,7 @@ import {
   sumHotelStayNights,
   type TripHotelStay,
 } from "@/lib/supabase-trip-hotels"
+import { formatMonthDayYear } from "@/lib/date-display"
 import { summarizeHotels } from "@/lib/trip-manual-details"
 import type { Trip } from "@/lib/trips"
 
@@ -311,7 +312,7 @@ function HotelsPageBody({ trip }: { trip: Trip }) {
                       <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground">
                         {stay.area ? <span>{stay.area}</span> : null}
                         <span>
-                          {stay.checkIn} {"->"} {stay.checkOut}
+                          {formatMonthDayYear(stay.checkIn)} {"->"} {formatMonthDayYear(stay.checkOut)}
                         </span>
                       </div>
                     </div>
@@ -330,11 +331,11 @@ function HotelsPageBody({ trip }: { trip: Trip }) {
                   <div className="grid gap-3 text-sm text-muted-foreground sm:grid-cols-2 xl:grid-cols-3">
                     <div>
                       <p className="text-xs uppercase tracking-wide">Check-in</p>
-                      <p className="mt-1 text-foreground">{stay.checkIn || "—"}</p>
+                      <p className="mt-1 text-foreground">{stay.checkIn ? formatMonthDayYear(stay.checkIn) : "—"}</p>
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-wide">Check-out</p>
-                      <p className="mt-1 text-foreground">{stay.checkOut || "—"}</p>
+                      <p className="mt-1 text-foreground">{stay.checkOut ? formatMonthDayYear(stay.checkOut) : "—"}</p>
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-wide">Cost</p>

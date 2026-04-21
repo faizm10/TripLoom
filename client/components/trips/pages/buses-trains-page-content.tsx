@@ -30,6 +30,7 @@ import {
   formatTime12hForDisplay,
   isCanonicalTime12h,
 } from "@/lib/time-12h"
+import { formatMonthDayYear } from "@/lib/date-display"
 import { Time12hFields } from "@/components/trips/time-12h-fields"
 
 const LEG_OPTIONS: Array<{ value: GroundLegType; label: string }> = [
@@ -397,7 +398,7 @@ function BusesTrainsPageBody({ trip }: { trip: Trip }) {
                         <p className="text-base font-semibold">{entry.route}</p>
                       </div>
                       <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground">
-                        <span>{entry.date || "No date"}</span>
+                        <span>{entry.date ? formatMonthDayYear(entry.date) : "No date"}</span>
                         {entry.operator ? <span>{entry.operator}</span> : null}
                         {entry.serviceNumber ? <span>{entry.serviceNumber}</span> : null}
                       </div>

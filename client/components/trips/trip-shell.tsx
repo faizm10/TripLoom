@@ -10,6 +10,7 @@ import { TripAiPanel } from "@/components/trips/trip-ai-panel"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
 import { countryNameFromCode } from "@/lib/iso-countries"
+import { formatMonthDayYearRange } from "@/lib/date-display"
 import { getUserProfileFromSupabase } from "@/lib/supabase-profile"
 import type { User } from "@supabase/supabase-js"
 import type { Trip } from "@/lib/trips"
@@ -124,9 +125,10 @@ export function TripShell({
   const pageKey = getPageKey(pathname)
   const header = pageCopy[pageKey] || pageCopy.overview
   const people = getTravelerPills(trip)
+  const tripDateRange = formatMonthDayYearRange(trip.startDate, trip.endDate)
   const pageDetails = [
     `destination=${trip.destination}`,
-    `dates=${trip.startDate} to ${trip.endDate}`,
+    `dates=${tripDateRange}`,
     `travelers=${trip.travelers}`,
     `status=${trip.status}`,
     residenceLabel ? `country_of_residence=${residenceLabel}` : "",
@@ -179,7 +181,7 @@ export function TripShell({
               <div>
                 <div style={{ fontSize: 13, fontWeight: 500 }}>{trip.destination}</div>
                 <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
-                  {trip.startDate} → {trip.endDate}
+                  {tripDateRange}
                 </div>
               </div>
               <span style={{ color: "var(--ink-3)", fontSize: 11 }}>{trip.totalDays}d</span>
@@ -310,17 +312,17 @@ export function TripShell({
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                   }}
-                >
-                  {header.title}
-                  <span
+                  >
+                    {header.title}
+                    <span
                     style={{
                       fontStyle: "italic",
                       color: "var(--ink-3)",
                       fontSize: 24,
                       marginLeft: 12,
                     }}
-                  >
-                    {trip.startDate} → {trip.endDate}
+                    >
+                    {tripDateRange}
                   </span>
                 </div>
                 <div style={{ marginTop: 8, color: "var(--ink-3)", fontSize: 13 }}>{header.subtitle}</div>

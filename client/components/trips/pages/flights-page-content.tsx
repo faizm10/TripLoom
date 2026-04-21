@@ -24,6 +24,7 @@ import {
 import { getTripGroundTripsFromSupabase } from "@/lib/supabase-trip-ground"
 import { itineraryWithTransportSummary } from "@/lib/trip-flight-itinerary-sync"
 import { summarizeFlights, summarizeGroundTrips } from "@/lib/trip-manual-details"
+import { formatMonthDayYear } from "@/lib/date-display"
 import type { Trip } from "@/lib/trips"
 import { getTripTravelScope } from "@/lib/trips"
 import {
@@ -510,7 +511,7 @@ function FlightsPageBody({ trip }: { trip: Trip }) {
                         ) : null}
                       </div>
                       <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-muted-foreground">
-                        <span>{entry.date || "No date"}</span>
+                        <span>{entry.date ? formatMonthDayYear(entry.date) : "No date"}</span>
                         {entry.airline ? <span>{entry.airline}</span> : null}
                         {entry.flightNumber ? <span>{entry.flightNumber}</span> : null}
                       </div>

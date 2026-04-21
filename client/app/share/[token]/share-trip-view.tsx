@@ -20,6 +20,7 @@ import {
   UsersIcon,
 } from "lucide-react"
 import { Brand } from "@/components/Shared"
+import { formatMonthDayYear, formatMonthDayYearRange } from "@/lib/date-display"
 import type {
   PublicFlightShare,
   PublicGroundShare,
@@ -51,17 +52,7 @@ const fadeUp = {
 /* ───── helpers ───── */
 
 function formatDateRange(start: string, end: string): string {
-  try {
-    const s = new Date(start + "T00:00:00")
-    const e = new Date(end + "T00:00:00")
-    const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" }
-    if (s.getFullYear() === e.getFullYear() && s.getMonth() === e.getMonth()) {
-      return `${s.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${e.getDate()}, ${e.getFullYear()}`
-    }
-    return `${s.toLocaleDateString("en-US", opts)} – ${e.toLocaleDateString("en-US", opts)}`
-  } catch {
-    return `${start} → ${end}`
-  }
+  return formatMonthDayYearRange(start, end)
 }
 
 function formatTime(t: string): string {
@@ -313,7 +304,7 @@ function FlightCard({ f, idx }: { f: PublicFlightShare; idx: number }) {
         >
           {f.route}
         </h3>
-        <Caps>{f.date}</Caps>
+        <Caps>{formatMonthDayYear(f.date)}</Caps>
       </div>
 
       <p style={{ marginTop: 4, color: "var(--ink-3)", fontSize: 13 }}>
@@ -425,7 +416,7 @@ function GroundCard({ g, idx }: { g: PublicGroundShare; idx: number }) {
         >
           {g.route}
         </h3>
-        <Caps>{g.travelDate}</Caps>
+        <Caps>{formatMonthDayYear(g.travelDate)}</Caps>
       </div>
       <p style={{ marginTop: 4, color: "var(--ink-3)", fontSize: 13 }}>
         {g.operator}
@@ -508,7 +499,7 @@ function HotelCard({ h, idx }: { h: PublicHotelShare; idx: number }) {
               marginTop: 3,
             }}
           >
-            {h.checkIn}
+            {formatMonthDayYear(h.checkIn)}
           </div>
         </div>
         <div>
@@ -521,7 +512,7 @@ function HotelCard({ h, idx }: { h: PublicHotelShare; idx: number }) {
               marginTop: 3,
             }}
           >
-            {h.checkOut}
+            {formatMonthDayYear(h.checkOut)}
           </div>
         </div>
       </div>
@@ -743,7 +734,12 @@ function ItineraryDayGroup({
     const d = new Date(startDate + "T00:00:00")
     d.setDate(d.getDate() + dayIndex - 1)
     weekday = d.toLocaleDateString("en-US", { weekday: "long" })
-    datePart = d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    datePart = formatMonthDayYear(startDate)
+    if (dayIndex > 1) {
+      const shifted = new Date(startDate + "T00:00:00")
+      shifted.setDate(shifted.getDate() + dayIndex - 1)
+      datePart = `${shifted.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${shifted.getFullYear()}`
+    }
   } catch {
     /* keep blank */
   }
